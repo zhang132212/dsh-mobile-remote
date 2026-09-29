@@ -4064,11 +4064,27 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
     // （原仅按文本缓存 key,渲染颜色已烘焙进 Widget,切换主题不刷新）
     final cacheKey = '${widget.text}\u0000${Theme.of(context).brightness}';
     if (cacheKey != _parsedFor) {
-      _parsedFor = cacheKey;
-      _blocks = renderMarkdownBlocks(widget.text.isEmpty ? '…' : widget.text, context);
+      // v3.2.3 修：**必须在解析成功之后**才记缓存键。
+      // 原实现先写 _parsedFor 再解析，解析一旦抛异常，_parsedFor 已经等于 cacheKey，
+      // 而 _blocks 仍是 null —— 之后每次 build 都死在下面的 ..._blocks!，
+      // 于是这条消息**永久**画不出来（真机复现：算积分那条回答整条消失）。
+      try {
+        _blocks = renderMarkdownBlocks(widget.text.isEmpty ? '…' : widget.text, context);
+        _parsedFor = cacheKey;
+      } catch (error, stack) {
+        // 富渲染失败也绝不丢内容：降级成纯文本，至少主人能看到原文。
+        AppLog.instance.log('Chat: 气泡富渲染失败，降级纯文本：$error\n$stack');
+        _blocks = [
+          SelectableText(
+            widget.text.isEmpty ? '…' : widget.text,
+            style: TextStyle(fontSize: 14.5, height: 1.6, color: DshColors.ink(context)),
+          ),
+        ];
+        _parsedFor = cacheKey;
+      }
       if (_parseLogs < 3) {
         _parseLogs++;
-        AppLog.instance.log('Chat: bubble 解析 len=${widget.text.length} blocks=${_blocks!.length}');
+        AppLog.instance.log('Chat: bubble 解析 len=${widget.text.length} blocks=${_blocks?.length ?? 0}');
       }
     }
     final ink3 = DshColors.ink3(context);
@@ -4093,7 +4109,8 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
             ),
             const SizedBox(height: 3),
             if (hasReasoning) _buildReasoningChain(context),
-            ..._blocks!,
+            // v3.2.3：不再用 _blocks!（空断言会让整条消息消失），空则什么都不渲染
+            ...(_blocks ?? const <Widget>[]),
             // v3.0.0 图像链路：附图（agent 回复里的图片，点击全屏）
             if (widget.images.isNotEmpty) ...[
               const SizedBox(height: 6),

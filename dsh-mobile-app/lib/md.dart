@@ -242,6 +242,12 @@ List<Widget> renderMarkdownBlocks(String text, BuildContext context) {
           child: DisplayMath(markedTex, style: TextStyle(fontSize: 15, height: 1.4, color: ink)),
         ),
       ));
+      // v3.2.3 严重修复：这里原来漏了 i++ —— 因为是 while 循环，
+      // 整行 /"…"/ 公式会让同一行被无限解析、无限 add，堆被撑爆（真机 OOM），
+      // 气泡永远构建不完 → 那条消息永久不显示，且下次 build 撞 _blocks! 报
+      // 「Null check operator used on a null value」。
+      // 对照：$$…$$ 分支（下面）一直有 i++，所以老测试全过、唯独新标记漏网。
+      i++;
       continue;
     }
     // v3.2.0：显示式公式 $$...$$（可跨行）独占一块——与网页端 MathJax 的

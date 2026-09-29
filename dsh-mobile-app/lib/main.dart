@@ -44,6 +44,8 @@ void main() async {
   // 全局错误边界：build/布局异常不再白屏或静默闪退，直接显示错误文本（调试用）
   ErrorWidget.builder = (details) {
     AppLog.instance.log('build 异常: ${details.exceptionAsString()}');
+    // v3.2.3 排障：只记异常消息定位不到代码 —— 把堆栈也记下来（多行，logcat 可直接看）
+    AppLog.instance.log('build 栈:\n${details.stack ?? "(无栈)"}');
     return Material(
       color: const Color(0xFF0E1116),
       child: Center(
