@@ -19,6 +19,13 @@ class MainActivity : FlutterActivity() {
     // v2.7.2 review(FS1)：悬浮球面板动作可能发生在冷启动（进程已被系统杀死时点"打开会话/充值/通知"），
     // 此时走 onCreate 而非 onNewIntent；Flutter 引擎未就绪前先暂存，configureFlutterEngine 后再投递。
     private var pendingOpenAction: String? = null // "charge" | "usage" | "notifs" | "session:<id>"
+    // v3.2.0：外部 App「用本 App 打开 / 分享到本 App」进来的文档。
+    // 与上面的面板动作同一个理由：冷启动时 intent 早于 Flutter 引擎就绪，
+    // 原生侧先把 {name, bytes} 攥在手里，configureFlutterEngine 之后再投给 Dart。
+    private var pendingDoc: HashMap<String, Any>? = null
+    // 去重标记：onCreate / configureFlutterEngine / onNewIntent 三条路径都会尝试投递，
+    // 不去重会把同一个文档弹两遍；Dart 侧调 clearIncomingFile 确认消费完才复位。
+    private var docDelivered = false
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,6 +39,8 @@ class MainActivity : FlutterActivity() {
             }
         }
         handleIntentExtras(intent)
+        // v3.2.0：外部「打开方式」冷启动——进程被系统杀死后点文件进 App 走的是这里
+        handleDocIntent(intent)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -51,6 +60,14 @@ class MainActivity : FlutterActivity() {
                     saveToDownloads(name, bytes, result)
                 }
                 "pickFile" -> pickFile(result)
+                // v3.2.0：投递过的文档可能早于 Dart 侧 handler 注册——Dart 首帧后主动拉取一份兜底。
+                // 只读不清：清空权交给 clearIncomingFile，避免「投递失败 + 已置空」导致文档丢失。
+                "getIncomingFile" -> result.success(pendingDoc)
+                "clearIncomingFile" -> {
+                    pendingDoc = null
+                    docDelivered = false
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -103,12 +120,17 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // v3.2.0：冷启动时 intent 先于引擎到达，handleDocIntent 投递是 no-op——这里补投一次；
+        // 若 intent 来得更晚（onNewIntent），此调用只是空转，docDelivered 保证不会重复弹。
+        deliverPendingDoc()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // 悬浮球迷你面板动作（热启动路径）：暂存后投递（引擎就绪时立即生效）
         handleIntentExtras(intent)
+        // v3.2.0：singleTop + 已在栈顶时再点一个文件走这里（不重建 Activity，只有 onNewIntent）
+        handleDocIntent(intent)
     }
 
     /** 解析悬浮球面板动作 extra；onCreate（冷启动）与 onNewIntent（热启动）共用。 */
@@ -136,6 +158,54 @@ class MainActivity : FlutterActivity() {
             }
         }
         pendingOpenAction = null
+    }
+
+    // ── v3.2.0：外部「用本 App 打开 / 分享到本 App」的文档 ──────────────────
+    /**
+     * 解析外部传入的文档 intent，读成 {name, bytes} 暂存；onCreate（冷启动）与 onNewIntent（热启动）共用。
+     * 原生侧不解析文档格式（md/docx/xlsx 都只是字节），解析与渲染全交给 Dart 侧。
+     */
+    @Suppress("DEPRECATION")
+    private fun handleDocIntent(intent: Intent?) {
+        if (intent == null) return
+        // ACTION_VIEW = 文件管理器点「打开方式」（uri 在 data）；
+        // 其余（ACTION_SEND 分享）uri 挂在 EXTRA_STREAM 上（微信/QQ 的「分享到」走这条）。
+        // 单参泛型 getParcelableExtra 自 API 33 起标记弃用但并未移除（android-35/36 的 android.jar 实测仍在），
+        // 这里显式写出泛型实参，绕开类型推导，任何 compileSdk 下都稳。
+        val stream = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+        val uri: android.net.Uri? = if (intent.action == Intent.ACTION_VIEW) intent.data else stream
+        if (uri == null) return
+        val name = queryDisplayName(uri) ?: (uri.lastPathSegment ?: "document")
+        val bytes = try {
+            contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        } catch (e: Exception) {
+            // 权限不足 / 分享的临时 uri 已过期 / 网盘链接失效都会走到这里。
+            // **不能静默 return**：用户点了「用 DSH Remote 打开」却毫无反应，会以为 App 坏了。
+            // 把失败也投递给 Dart，由前端给出可读提示（Dart 侧见 _openIncomingDoc 的 error 分支）。
+            pendingDoc = hashMapOf<String, Any>(
+                "name" to name,
+                "error" to (e.message ?: e.javaClass.simpleName),
+            )
+            deliverPendingDoc()
+            return
+        }
+        if (bytes == null || bytes.isEmpty()) {
+            pendingDoc = hashMapOf<String, Any>("name" to name, "error" to "empty")
+            deliverPendingDoc()
+            return
+        }
+        pendingDoc = hashMapOf<String, Any>("name" to name, "bytes" to bytes)
+        deliverPendingDoc()
+    }
+
+    /** 投递暂存的文档到 Flutter 侧（引擎未就绪时 no-op，等 configureFlutterEngine 再投）。 */
+    private fun deliverPendingDoc() {
+        val doc = pendingDoc ?: return
+        val ch = filesChannel ?: return
+        // 已投递过就不再投：冷启动 + 热启动路径叠加时会弹两次同一个文档
+        if (docDelivered) return
+        ch.invokeMethod("openDocument", doc)
+        docDelivered = true
     }
 
     private fun startBubbleService() {

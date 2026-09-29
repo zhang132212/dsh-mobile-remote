@@ -15,7 +15,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { apply, validateQuestionAnswers } from "../lib/index.js";
+import { apply, validateQuestionAnswers, summarizeEvent } from "../lib/index.js";
 
 const CONFIG = {
 	path: "/m",
@@ -85,8 +85,10 @@ const APPROVAL_FRAME = {
 };
 
 /** 假宿主 ctx + 假 typertGateway（记录发往内核的 endpoint/args）。 */
-function createHarness({ agents, goals, workspaceRegistry, frames = [] } = {}) {
+function createHarness({ agents, goals, workspaceRegistry, frames = [], endStream = false } = {}) {
 	const routes = [];
+	const listeners = new Map();
+	const effects = [];
 	const provided = new Map();
 	const logs = { warn: [], info: [] };
 	const rpcCalls = [];
@@ -103,10 +105,11 @@ function createHarness({ agents, goals, workspaceRegistry, frames = [] } = {}) {
 			rpcDispatch.push({ endpoint, args: payload?.args });
 			return { ok: true, value: undefined };
 		},
-		async openWireStream() {
+		async openWireStream(_endpoint, _payload, signal) {
 			return (async function* frames_() {
 				yield { type: "ready", clientId: "c-1" };
 				for (const frame of frames) yield frame;
+				if (!endStream && !signal.aborted) await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
 			})();
 		},
 	});
@@ -115,9 +118,10 @@ function createHarness({ agents, goals, workspaceRegistry, frames = [] } = {}) {
 		logger: { warn: (m) => logs.warn.push(String(m)), info: (m) => logs.info.push(String(m)) },
 		get(name) { return provided.get(name); },
 		provide(name, value) { provided.set(name, value); },
-		on() { return () => {}; },
+		on(event, callback) { listeners.set(event, callback); return () => listeners.delete(event); },
 		effect(callback) {
 			const disposer = callback?.();
+			if (typeof disposer === "function") effects.push(disposer);
 			return typeof disposer === "function" ? disposer : () => {};
 		},
 		inject() {},
@@ -127,9 +131,10 @@ function createHarness({ agents, goals, workspaceRegistry, frames = [] } = {}) {
 	return {
 		route: routes.find((route) => route.path === "/m/api").handler,
 		rpcCalls,
+		listeners,
 		rpcDispatch,
 		logs,
-		clean() { dispose?.(); },
+		clean() { for (const effect of effects.reverse()) effect(); dispose?.(); },
 	};
 }
 
@@ -475,4 +480,65 @@ test("/files/upload：文件名黑名单含 NUL", async () => {
 	} finally {
 		harness.clean();
 	}
+});
+
+function phone(harness) {
+  const res = new FakeResponse();
+  harness.route(new FakeRequest('/m/api/events'), res);
+  return res;
+}
+function phoneFrames(res) {
+  return res.chunks.flatMap(chunk => chunk.split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6))));
+}
+
+test('offline question is replayed to phone and its answer settles the same gateway event', async () => {
+  const harness = createHarness({ frames: [QUESTION_FRAME] });
+  let res;
+  try {
+    await waitForFrames(harness, 2);
+    res = phone(harness);
+    await waitFor(() => phoneFrames(res).some(item => item.frame?.type === 'question/requested'));
+    const frame = phoneFrames(res).find(item => item.frame?.type === 'question/requested').frame;
+    assert.deepEqual(frame.questions, [QUESTION]);
+    const reply = await call(harness.route, { url: '/m/api/respond', method: 'POST', body: {
+      kind: 'question', rpcId: frame.rpcId, sessionId: frame.sessionId,
+      answers: [{ id: QUESTION.id, selected: ['Yes'] }],
+    }});
+    assert.equal(reply.status, 200);
+    assert.equal(harness.rpcDispatch.at(-1).args.eventId, QUESTION_FRAME.eventId);
+    assert.deepEqual(harness.rpcDispatch.at(-1).args.outcome.value.answers, [{ id: QUESTION.id, selected: ['Yes'] }]);
+    assert.ok(phoneFrames(res).some(item => item.frame?.type === 'question/resolved'));
+  } finally { res?.destroy(); harness.clean(); }
+});
+
+test('closed gateway stream falls back to scoped question handler using agent.id', async () => {
+  const harness = createHarness({ endStream: true });
+  let res;
+  try {
+    await waitForFrames(harness, 1);
+    await new Promise(resolve => setImmediate(resolve));
+    res = phone(harness);
+    await waitFor(() => phoneFrames(res).some(item => item.type === 'hello'));
+    let delegated = false;
+    const answer = harness.listeners.get('user-questions/request')({ agent: { id: 'session-A' }, questions: [QUESTION] }, () => { delegated = true; });
+    await waitFor(() => phoneFrames(res).some(item => item.frame?.type === 'question/requested'));
+    assert.equal(delegated, false, 'dead stream must not suppress phone card');
+    const frame = phoneFrames(res).find(item => item.frame?.type === 'question/requested').frame;
+    assert.equal(frame.sessionId, 'session-A');
+    const result = await call(harness.route, { url: '/m/api/respond', method: 'POST', body: {
+      kind: 'question', rpcId: frame.rpcId, sessionId: frame.sessionId, answers: [{ id: QUESTION.id, selected: ['No'] }],
+    }});
+    assert.equal(result.status, 200);
+    assert.deepEqual(await answer, { answers: [{ id: QUESTION.id, selected: ['No'] }] });
+  } finally { res?.destroy(); harness.clean(); }
+});
+
+test('subagent messages keep typed provenance in history and live summaries', () => {
+  const summary = summarizeEvent({ seq: 1, type: 'user/message', data: {
+    id: 'm1', content: [{ type: 'text', text: 'Finished the bounded task.' }],
+    source: { kind: 'subagent-report', form: 'relay', senderSessionId: 'child-A' },
+  }});
+  assert.equal(summary.data.sourceKind, 'subagent-report');
+  assert.equal(summary.data.senderSessionId, 'child-A');
+  assert.equal(summary.data.sourceForm, 'relay');
 });

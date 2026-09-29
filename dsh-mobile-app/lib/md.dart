@@ -1,8 +1,13 @@
 // Markdown 渲染 —— 完全对齐网页端 page.html 的 renderMarkdown：
 // 段落/标题1-4/列表/引用/代码块/行内代码/表格/链接/分隔线，样式同 CSS。
+//
+// v3.2.0：接入 LaTeX 公式——行内 $...$ / \(...\) 与显示式 $$...$$ / \[...\] 交给
+// math/view.dart（flutter_math_fork）真排版；代码块内的 $ 一律不解析（代码要保持原样）。
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'math/tex.dart';
+import 'math/view.dart';
 import 'theme.dart';
 import 'toast.dart';
 
@@ -214,6 +219,68 @@ List<Widget> renderMarkdownBlocks(String text, BuildContext context) {
     if (inCode) {
       codeBuf.add(raw);
       i++;
+      continue;
+    }
+    // v3.2.0：显式公式标记整行（/"…"/）→ 显示式公式块
+    final markedTex = formulaMarkupWholeLine(raw);
+    if (markedTex != null) {
+      flushPara();
+      flushList();
+      flushTable();
+      blocks.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          decoration: BoxDecoration(
+            color: brandSoft,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: DisplayMath(markedTex, style: TextStyle(fontSize: 15, height: 1.4, color: ink)),
+        ),
+      ));
+      continue;
+    }
+    // v3.2.0：显示式公式 $$...$$（可跨行）独占一块——与网页端 MathJax 的
+    // display 语义一致。只认「整行以 $$ 开头」，避免把正文里的「$$5」当公式。
+    final mathLine = raw.trim();
+    if (mathLine.startsWith(r'$$')) {
+      flushPara();
+      flushList();
+      flushTable();
+      final after = mathLine.substring(2);
+      var tex = '';
+      final sameLine = after.indexOf(r'$$');
+      if (sameLine >= 0) {
+        tex = after.substring(0, sameLine).trim();
+        i++;
+      } else {
+        final buf = <String>[after];
+        i++;
+        while (i < lines.length && !lines[i].contains(r'$$')) {
+          buf.add(lines[i]);
+          i++;
+        }
+        if (i < lines.length) {
+          buf.add(lines[i].split(r'$$').first);
+          i++;
+        }
+        tex = buf.join(' ').trim();
+      }
+      if (tex.isNotEmpty) {
+        blocks.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: BoxDecoration(
+              color: brandSoft,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: DisplayMath(tex, style: TextStyle(fontSize: 15, height: 1.4, color: ink)),
+          ),
+        ));
+      }
       continue;
     }
     // 表格：| a | b | 下一行是分隔行 |---|---|
@@ -471,8 +538,55 @@ class _InlineText extends StatelessWidget {
   }
 }
 
-/// 行内解析：**加粗** / *斜体* / `代码` / [文字](链接)
+/// 行内解析总入口（v3.2.0）：**行内代码 → 公式 → Markdown 行内规则**，三层优先级。
+///
+/// 顺序很关键，两头都踩过坑：
+///  · 代码必须最先切：正文写 `` `$$...$$` ``（说明公式语法）时，若先做公式探测，
+///    `$$` 会被当成显示式公式、反引号变成字面量（模拟器实测）；
+///  · 公式要早于 Markdown：公式里可能含 `*` `_` `[]`（如 `$a_i^*$`），
+///    先走 Markdown 正则会把它切碎成乱码。
 List<InlineSpan> _inlineSpans(String text, BuildContext context) {
+  final out = <InlineSpan>[];
+  var last = 0;
+  for (final m in _codeSpanRe.allMatches(text)) {
+    if (m.start > last) out.addAll(_mathThenMd(text.substring(last, m.start), context));
+    // 连反引号一起交回原有解析器 → 复用既有的行内代码样式
+    out.addAll(_mdInlineSpans(m.group(0)!, context));
+    last = m.end;
+  }
+  if (last < text.length) out.addAll(_mathThenMd(text.substring(last), context));
+  return out;
+}
+
+final _codeSpanRe = RegExp(r'`[^`]+`');
+
+/// 在非代码文本里切公式，其余走 Markdown 行内规则。
+List<InlineSpan> _mathThenMd(String text, BuildContext context) {
+  if (text.isEmpty) return const [];
+  final segs = findMathSegments(text);
+  if (segs.isEmpty) return _mdInlineSpans(text, context);
+  final out = <InlineSpan>[];
+  var last = 0;
+  for (final s in segs) {
+    if (s.start > last) out.addAll(_mdInlineSpans(text.substring(last, s.start), context));
+    out.add(_mathSpan(s.tex, context));
+    last = s.end;
+  }
+  if (last < text.length) out.addAll(_mdInlineSpans(text.substring(last), context));
+  return out;
+}
+
+/// 公式 → 基线对齐的 WidgetSpan（与正文同高，不会把行高撑破）。
+InlineSpan _mathSpan(String tex, BuildContext context) => WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      child: InlineMath(
+        tex,
+        style: TextStyle(fontSize: 15, height: 1.6, color: DshColors.ink(context)),
+      ),
+    );
+
+/// 行内解析：**加粗** / *斜体* / `代码` / [文字](链接)
+List<InlineSpan> _mdInlineSpans(String text, BuildContext context) {
   final spans = <InlineSpan>[];
   var last = 0;
   for (final m in _inlineRe.allMatches(text)) {

@@ -12,7 +12,9 @@ import 'floating.dart';
 import 'theme.dart';
 import 'logger.dart';
 import 'scan_screen.dart';
+import 'toast.dart';
 import 'screens/chat_screen.dart';
+import 'screens/doc_viewer_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/sessions_screen.dart';
 import 'screens/settings_screen.dart';
@@ -110,6 +112,109 @@ class _DshAppState extends State<DshApp> {
     // v2.7.2 review：冷启动面板动作兜底——Dart handler 注册晚于原生 deliver，
     // 首帧后主动拉取原生暂存的动作（可能已被 handler 消费，幂等）
     WidgetsBinding.instance.addPostFrameCallback((_) => _consumePendingFloatingAction());
+
+    // v3.2.0 文档阅读器：原生「用本 App 打开文档」入口。
+    // 原生侧（MainActivity）从 VIEW/SEND intent 读出 content:// 字节后，
+    // 经 dsh/files 通道的 openDocument 投递过来；冷启动时序不一定谁先谁后，
+    // 所以「事件推送」与「首帧主动拉取」两条路都要，靠下面的去重兜住重复。
+    const MethodChannel('dsh/files').setMethodCallHandler((call) async {
+      if (call.method == 'openDocument') {
+        await _openIncomingDoc(call.arguments);
+      }
+      return null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pullPendingDoc());
+  }
+
+  /// 本轮已处理的文档指纹（避免「事件推送」与「主动拉取」双路径重复弹同一份）。
+  String? _docSeenKey;
+  DateTime _docSeenAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  bool _isDuplicateDoc(String name, Uint8List bytes) {
+    final key = '$name:${bytes.length}';
+    final now = DateTime.now();
+    if (_docSeenKey == key && now.difference(_docSeenAt) < const Duration(seconds: 5)) {
+      return true;
+    }
+    _docSeenKey = key;
+    _docSeenAt = now;
+    return false;
+  }
+
+  /// 冷启动兜底：原生已暂存但事件早于 handler 注册时，首帧后主动取一次。
+  Future<void> _pullPendingDoc() async {
+    try {
+      const ch = MethodChannel('dsh/files');
+      final data = await ch.invokeMethod<Map<Object?, Object?>>('getIncomingFile');
+      if (data == null) return;
+      AppLog.instance.log('[doc] 首帧拉取到原生暂存文档: ${data['name']} '
+          'bytes=${(data['bytes'] as List?)?.length ?? 0} err=${data['error']}');
+      await _openIncomingDoc(data);
+    } catch (e) {
+      // 原生未实现该通道（旧版本 APK / 桌面端）时静默忽略
+      AppLog.instance.log('[doc] 拉取原生暂存文档失败: $e');
+    }
+  }
+
+  /// 打开外部传入的文档：推到统一的文档阅读页。
+  Future<void> _openIncomingDoc(dynamic args) async {
+    if (args is! Map) return;
+    final name = args['name'];
+    const ch = MethodChannel('dsh/files');
+    AppLog.instance.log('[doc] 收到外部文档 name=$name '
+        'bytes=${(args['bytes'] as List?)?.length ?? 0} err=${args['error']}');
+
+    // 原生读文件失败（权限不足 / 分享的临时 uri 过期 / 空文件）——必须给用户一个说法。
+    // 静默什么都不做会让「用 DSH Remote 打开」看起来像坏了（模拟器实测踩中这个体验坑）。
+    final err = args['error'];
+    if (err != null) {
+      final msgr = _rootMessenger();
+      if (msgr != null) {
+        showToastAt(
+          msgr,
+          L10n.t(
+            '无法读取该文件${name is String ? '（$name）' : ''}：权限不足或链接已失效',
+            'Cannot read the file${name is String ? ' ($name)' : ''}: permission denied or link expired',
+          ),
+        );
+      }
+      try {
+        await ch.invokeMethod('clearIncomingFile');
+      } catch (_) {/* 清理失败不影响提示 */}
+      return;
+    }
+
+    final bytes = args['bytes'];
+    if (bytes is! Uint8List || name is! String || bytes.isEmpty) {
+      AppLog.instance.log('[doc] 参数不完整，忽略（bytes/name 缺失）');
+      return;
+    }
+    if (_isDuplicateDoc(name, bytes)) {
+      AppLog.instance.log('[doc] 重复投递，忽略');
+      return;
+    }
+
+    final nav = rootNavigatorKey.currentState;
+    if (nav == null) {
+      AppLog.instance.log('[doc] 导航器未就绪，放弃打开');
+      return;
+    }
+    try {
+      await ch.invokeMethod('clearIncomingFile');
+    } catch (_) {/* 清理失败不影响打开 */}
+    AppLog.instance.log('[doc] 打开阅读页: $name (${bytes.length} 字节)');
+    await nav.push(
+      MaterialPageRoute<void>(
+        builder: (_) => DocViewerScreen(name: name, bytes: bytes),
+      ),
+    );
+  }
+
+  /// 取一个可用的 ScaffoldMessenger（用于无页面 context 的异步回调里弹提示）。
+  ScaffoldMessengerState? _rootMessenger() {
+    final ctx = rootNavigatorKey.currentContext;
+    if (ctx == null) return null;
+    return ScaffoldMessenger.maybeOf(ctx);
   }
 
   /// 统一处理悬浮球面板动作（热启动 handler 与冷启动 consume 共用）。
@@ -435,9 +540,8 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
             Text(
               titles[_index],
               style: TextStyle(
-                fontSize: _index == 0 ? 20 : 17,
-                fontWeight: FontWeight.w700,
-                fontFamily: _index == 0 ? 'Georgia' : null,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],

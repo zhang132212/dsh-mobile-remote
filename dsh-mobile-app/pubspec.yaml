@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 3.1.5+22
+version: 3.1.5+23
 
 environment:
   sdk: ^3.13.0
@@ -42,6 +42,13 @@ dependencies:
   package_info_plus: ^10.2.1
   # v3.0.0 ?????????????????????????????????????????????????????????PC ?????????
   image_picker: ^1.1.2
+  # v3.2.0 文档阅读器：数学公式渲染（纯 Dart + 内置 KaTeX 字体，无需 WebView/联网）
+  flutter_math_fork: ^0.7.4
+  # v3.2.0 文档阅读器：xlsx 读取（安全审计已过：无网络/无子进程，仅内存解码）
+  excel: ^4.0.6
+  # v3.2.0 文档阅读器：docx/xlsx 是 zip + XML，解包用（原为传递依赖，现显式声明）
+  archive: ^3.6.1
+  xml: ^6.6.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

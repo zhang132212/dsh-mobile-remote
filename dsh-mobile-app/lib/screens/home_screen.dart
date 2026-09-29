@@ -7,6 +7,7 @@ import '../store.dart';
 import '../theme.dart';
 import '../fmt.dart';
 import 'chat_screen.dart';
+import 'doc_browser_screen.dart';
 import 'sheets.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -163,6 +164,18 @@ class _HomeScreenState extends State<HomeScreen> {
                               }).whenComplete(() => _openingSheet = false);
                             },
                             child: Text(L10n.t('＋ 新建会话', '+ New Session')),
+                          ),
+                          const SizedBox(height: 10),
+                          // v3.2.0：文档阅读入口——浏览电脑工作区里的
+                          // md / txt / docx / xlsx 并直接在手机上阅读（公式真排版、
+                          // 超链接可点、可导出带 Word 原生公式的 .docx）
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+                            icon: const Icon(Icons.menu_book_outlined, size: 18),
+                            label: Text(L10n.t('文档阅读', 'Read Documents')),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(builder: (_) => const DocBrowserScreen()),
+                            ),
                           ),
                         ],
                       ),

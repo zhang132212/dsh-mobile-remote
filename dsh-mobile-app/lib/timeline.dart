@@ -380,7 +380,7 @@ class TimelineReducer {
       detailAvailable: event.detailAvailable,
       detailTextChars: event.detailTextChars,
       // 注入噪声 + 普通模式折叠的协议元数据都不进默认视图；调试模式仍可审阅。
-      filteredInOrdinary: injected || !timelineTypeVisibleIn(TimelineMode.ordinary, event.type),
+      filteredInOrdinary: (injected && !timelineIsAgentMessage(sourceKind)) || !timelineTypeVisibleIn(TimelineMode.ordinary, event.type),
     ));
   }
 
@@ -432,3 +432,6 @@ class TimelineReducer {
 }
 
 int? _maxSeq(int? a, int? b) => a == null ? b : (b == null || a >= b ? a : b);
+
+/// Agent relays are meaningful conversation events, not user speech or hidden context.
+bool timelineIsAgentMessage(String? kind) => const {'subagent-report', 'subagent-settled', 'coordinator'}.contains(kind);

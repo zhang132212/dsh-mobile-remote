@@ -73,6 +73,18 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
   }
 
+  testWidgets('子代理汇报在普通模式显示来源，可展开但不作为真人消息', (tester) async {
+    final event = _userEvent(sourceKind: 'subagent-report', text: '已完成文件检查');
+    (event['data'] as Map<String, dynamic>)['senderSessionId'] = 'child-A';
+    await pumpChat(tester, [event]);
+    final header = find.textContaining('子代理汇报 · child-A');
+    expect(header, findsOneWidget);
+    expect(find.text('已完成文件检查'), findsNothing);
+    await tester.tap(find.ancestor(of: header, matching: find.byType(InkWell)).first);
+    await tester.pump();
+    expect(find.text('已完成文件检查'), findsOneWidget);
+  });
+
   testWidgets('普通模式：注入消息整条不渲染（不占屏、也不出现注入标签）', (tester) async {
     await pumpChat(tester, [_userEvent(sourceKind: 'plugin')]);
     expect(find.text(_injectedText), findsNothing);

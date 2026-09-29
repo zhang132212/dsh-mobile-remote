@@ -214,7 +214,7 @@ void showModelSheet(BuildContext context, AppStore store) {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 12.5,
-                      color: store.sessionConfig.reasoningEffort == e ? Colors.white : DshColors.ink2(context),
+                      color: store.sessionConfig.reasoningEffort == e ? Theme.of(context).colorScheme.onPrimary : DshColors.ink2(context),
                       fontWeight: store.sessionConfig.reasoningEffort == e ? FontWeight.w600 : FontWeight.w400,
                     ),
                   ),

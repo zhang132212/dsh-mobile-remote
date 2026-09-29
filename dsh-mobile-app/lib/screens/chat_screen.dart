@@ -18,6 +18,7 @@ import '../theme.dart';
 import '../md.dart';
 import '../fmt.dart';
 import 'sheets.dart';
+import 'harness_question_card.dart';
 import 'session_tools_sheet.dart';
 
 /// v3.0.0(热修 07)：服务端"明确拒绝"的错误码白名单——这些代表消息**未被投递且服务端无回执**，
@@ -786,9 +787,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final debug = widget.store.timelineDebug;
     return conversationText([
       for (final m in ordered)
-        if (m.kind != _MsgKind.divider && !_isNoiseText(m.text) && !(m.injected && !debug))
+        if (m.kind != _MsgKind.divider && !_isNoiseText(m.text) && !(m.injected && !m.agentMessage && !debug))
           switch (m.kind) {
-            _MsgKind.user => (m.injected ? '系统注入' : '你', m.text),
+            _MsgKind.user => (m.agentMessage ? '代理消息' : m.injected ? '系统注入' : '你', m.text),
             _MsgKind.assistant => ('助手', m.text),
             _MsgKind.tool => ('工具', m.text),
             _MsgKind.event => ('事件', m.text),
@@ -1589,9 +1590,9 @@ class _ChatScreenState extends State<ChatScreen> {
           }
         }
         if (history) {
-          out.add(_MsgItem.user(text, seq: ev.seq, messageId: mid, images: _imagesOf(d), files: _filesOf(d), sourceKind: sourceKind));
+          out.add(_MsgItem.user(text, seq: ev.seq, messageId: mid, images: _imagesOf(d), files: _filesOf(d), sourceKind: sourceKind, senderSessionId: d?['senderSessionId'] as String?));
         } else {
-          out.insert(0, _MsgItem.user(text, seq: ev.seq, messageId: mid, images: _imagesOf(d), files: _filesOf(d), sourceKind: sourceKind));
+          out.insert(0, _MsgItem.user(text, seq: ev.seq, messageId: mid, images: _imagesOf(d), files: _filesOf(d), sourceKind: sourceKind, senderSessionId: d?['senderSessionId'] as String?));
         }
       case 'assistant/message':
         var body = d?['text'] as String? ?? '';
@@ -2276,7 +2277,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           // 内核问询/审批弹窗（思考中途需要你拍板，与 PC 端同一 pending 通道）
           if (_question != null)
-            _QuestionCard(
+            HarnessQuestionCard(
               // v3.1.6（app-audit ①5）：按 rpcId 给 key —— 同一会话连续两条问询若中间没有
               // 一帧 `_question == null`（store 的 per-session pending 是覆盖式写入），
               // 无 key 时 Flutter 会复用同一个 State：它按旧问询 id 建的 _selected/_ctrls
@@ -2333,6 +2334,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
                 decoration: BoxDecoration(
                   color: surface,
+                  border: Border.all(color: DshColors.line(context)),
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: Theme.of(context).brightness == Brightness.dark ? DshTheme.shadowDark : DshTheme.shadow,
                 ),
@@ -2440,18 +2442,18 @@ class _ChatScreenState extends State<ChatScreen> {
                                       width: 10,
                                       height: 10,
                                       decoration: BoxDecoration(
-                                        color: Colors.white,
+                                        color: Theme.of(context).colorScheme.onPrimary,
                                         borderRadius: BorderRadius.circular(2),
                                       ),
                                     ),
                                   )
                                 : _sending
-                                    ? const SizedBox(
+                                    ? SizedBox(
                                         width: 15,
                                         height: 15,
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).colorScheme.onPrimary),
                                       )
-                                    : const Icon(Icons.arrow_upward, size: 17, color: Colors.white),
+                                    : Icon(Icons.arrow_upward, size: 17, color: Theme.of(context).colorScheme.onPrimary),
                           ),
                         ),
                       ],
@@ -3017,7 +3019,7 @@ class _ChatScreenState extends State<ChatScreen> {
         // v3.1.4（issue #12）：系统注入消息（内核 source.kind ≠ "user"）不当普通气泡铺屏，
         // 改为可折叠块——默认收起、点按展开，展开状态按 messageId 持久化（同思维链机制）。
         if (_isNoiseText(item.text)) return const SizedBox.shrink();
-        if (item.injected && !widget.store.timelineDebug) return const SizedBox.shrink();
+        if (item.injected && !item.agentMessage && !widget.store.timelineDebug) return const SizedBox.shrink();
         if (item.injected) {
           final ikey = item.messageId ?? 's${item.seq}';
           final expanded = widget.store.reasoningOverrideOf(_mySessionId ?? '', 'inj:$ikey') ?? false;
@@ -3029,6 +3031,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 _InjectedBubble(
                   text: item.text,
                   sourceKind: item.sourceKind,
+                  senderSessionId: item.senderSessionId,
                   expanded: expanded,
                   // setReasoningOverride 是 async（内部同步更新内存映射、再异步落盘）：
                   // 必须放在 setState 之外，否则 setState 的闭包返回 Future → debug/profile
@@ -3063,11 +3066,11 @@ class _ChatScreenState extends State<ChatScreen> {
               alignment: Alignment.centerRight,
               child: Container(
                 margin: const EdgeInsets.only(bottom: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                constraints: const BoxConstraints(maxWidth: 320),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
                 decoration: BoxDecoration(
-                  color: DshColors.line(context),
-                  borderRadius: BorderRadius.circular(14),
+                  color: DshColors.bubble(context),
+                  borderRadius: BorderRadius.circular(22),
                 ),
                 child: child,
               ),
@@ -3080,7 +3083,7 @@ class _ChatScreenState extends State<ChatScreen> {
              if (item.files.isNotEmpty)
                userBubble(_FileResults(files: item.files)),
             if (text.isNotEmpty)
-              userBubble(Text(text, style: const TextStyle(fontSize: 15, height: 1.5))),
+              userBubble(Text(text, style: const TextStyle(fontSize: 14, height: 1.57))),
             // v3.1.5（issue #15）：用户消息此前没有任何复制入口（只有助手消息有操作栏）——
             // 这里右对齐补一个「复制」，复用 _runMessageAction('copy')：复制正文 + 「已复制」提示，
             // 与助手消息行为一致。整段选择另由 SelectionArea 承担（长按选词）。
@@ -3241,6 +3244,7 @@ class _MsgItem {
   /// "user" = 真人发言；"plugin" / "agent-instructions" / "tool" 等 = 系统注入；
   /// null = 旧内核未下发（客户端退回启发式判断）。
   final String? sourceKind;
+  final String? senderSessionId;
   // 对话时间线 Tool activity / 未知 Visible event 字段。
   final String? toolCallId;
   final String? toolName;
@@ -3257,7 +3261,7 @@ class _MsgItem {
   final String? detailErrorCode;
   /// 详情正文长度提示（服务端 `detail.textChars`）：普通模式据此判断是否真有正文增量。
   final int? detailTextChars;
-  _MsgItem.user(this.text, {this.seq, this.messageId, this.images = const [], this.files = const [], this.sourceKind, this.detailTextChars})
+  _MsgItem.user(this.text, {this.seq, this.messageId, this.images = const [], this.files = const [], this.sourceKind, this.senderSessionId, this.detailTextChars})
       : kind = _MsgKind.user,
         latestSeq = seq,
         detailSeq = seq,
@@ -3282,6 +3286,7 @@ class _MsgItem {
         latestSeq = seq,
         detailSeq = seq,
         sourceKind = null,
+        senderSessionId = null,
         toolCallId = null,
         toolName = null,
         toolArguments = '',
@@ -3301,6 +3306,7 @@ class _MsgItem {
          files = const [],
         reasoning = null,
         sourceKind = null,
+        senderSessionId = null,
         toolCallId = null,
         toolName = null,
         toolArguments = '',
@@ -3340,6 +3346,7 @@ class _MsgItem {
         rating = null,
         reasoning = null,
         sourceKind = null,
+        senderSessionId = null,
         eventType = 'tool/activity';
   _MsgItem.event({
     required this.eventType,
@@ -3366,6 +3373,7 @@ class _MsgItem {
          files = const [],
         reasoning = null,
         sourceKind = null,
+        senderSessionId = null,
         toolCallId = null,
         toolName = null,
         toolArguments = '',
@@ -3374,10 +3382,11 @@ class _MsgItem {
 
   /// 注入消息（非真人发言）→ 渲染成可折叠块，而不是普通气泡（v3.1.4）
   bool get injected => sourceKind != null && sourceKind != 'user';
+  bool get agentMessage => timelineIsAgentMessage(sourceKind);
 
   _MsgItem copyWith({int? seq, String? messageId}) {
     assert(kind == _MsgKind.user, 'copyWith only supports user items');
-    return _MsgItem.user(text, seq: seq ?? this.seq, messageId: messageId ?? this.messageId, images: images, files: files, sourceKind: sourceKind, detailTextChars: detailTextChars);
+    return _MsgItem.user(text, seq: seq ?? this.seq, messageId: messageId ?? this.messageId, images: images, files: files, sourceKind: sourceKind, senderSessionId: senderSessionId, detailTextChars: detailTextChars);
   }
 
   _MsgItem copyTool({
@@ -3462,17 +3471,25 @@ class _MsgItem {
 class _InjectedBubble extends StatelessWidget {
   final String text;
   final String? sourceKind;
+  final String? senderSessionId;
   final bool expanded;
   final ValueChanged<bool> onToggle;
   const _InjectedBubble({
     required this.text,
     required this.sourceKind,
+    this.senderSessionId,
     required this.expanded,
     required this.onToggle,
   });
 
   String get _label {
     switch (sourceKind) {
+      case 'subagent-report':
+        return L10n.t('子代理汇报', 'Subagent report');
+      case 'subagent-settled':
+        return L10n.t('子代理状态', 'Subagent status');
+      case 'coordinator':
+        return L10n.t('主代理消息', 'Coordinator message');
       case 'agent-instructions':
         return L10n.t('系统指令注入', 'Injected instructions');
       case 'plugin':
@@ -3503,11 +3520,11 @@ class _InjectedBubble extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               child: Row(
                 children: [
-                  Icon(Icons.settings_suggest_outlined, size: 14, color: ink3),
+                  Icon(timelineIsAgentMessage(sourceKind) ? Icons.account_tree_outlined : Icons.settings_suggest_outlined, size: 14, color: ink3),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '$_label · ${text.length} ${L10n.t('字', 'chars')}',
+                      '$_label${senderSessionId == null ? '' : ' · $senderSessionId'} · ${text.length} ${L10n.t('字', 'chars')}',
                       style: TextStyle(fontSize: 11.5, color: ink3, fontWeight: FontWeight.w600),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -4919,273 +4936,6 @@ class _ActionChip extends StatelessWidget {
 
 /// 内核问询弹窗卡片：问题 + 选项（单选/多选）+ 「输入其他答案」自由输入 + 提交/取消。
 /// 挂在消息流与输入框之间（思考中途需要用户拍板时出现）。
-class _QuestionCard extends StatefulWidget {
-  final QuestionRequest request;
-  final VoidCallback onCancel;
-  final Future<void> Function(List<Map<String, dynamic>> answers) onSubmitted;
-  // v3.1.6（app-audit ①5）：支持 key——聊天页按 rpcId 传 ValueKey，换问询时强制新建 State
-  const _QuestionCard({super.key, required this.request, required this.onCancel, required this.onSubmitted});
-
-  @override
-  State<_QuestionCard> createState() => _QuestionCardState();
-}
-
-class _QuestionCardState extends State<_QuestionCard> {
-  final Map<String, Set<String>> _selected = {}; // questionId -> 选项 label 集合
-  final Map<String, String> _custom = {}; // questionId -> 自定义输入
-  final Map<String, TextEditingController> _ctrls = {};
-  bool _submitting = false;
-  String? _hint; // 校验提示
-
-  @override
-  void initState() {
-    super.initState();
-    for (final q in widget.request.questions) {
-      _selected[q.id] = {};
-      _custom[q.id] = '';
-      _ctrls[q.id] = TextEditingController();
-    }
-  }
-
-  @override
-  void dispose() {
-    for (final c in _ctrls.values) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  void _toggle(AskQuestion q, String label) {
-    setState(() {
-      final sel = _selected[q.id]!;
-      if (q.multiSelect) {
-        if (!sel.add(label)) sel.remove(label);
-      } else {
-        if (sel.contains(label)) {
-          sel.clear();
-        } else {
-          sel
-            ..clear()
-            ..add(label);
-        }
-      }
-      // 单选语义：选了选项就清掉自定义输入（内核要求二选一）
-      if (!q.multiSelect && sel.isNotEmpty) {
-        _custom[q.id] = '';
-        _ctrls[q.id]!.clear();
-      }
-      _hint = null;
-    });
-  }
-
-  void _onCustom(AskQuestion q, String v) {
-    setState(() {
-      _custom[q.id] = v;
-      // 单选语义：输入了自定义答案就清掉选项
-      if (!q.multiSelect && v.trim().isNotEmpty) _selected[q.id]!.clear();
-      _hint = null;
-    });
-  }
-
-  Future<void> _submit() async {
-    final answers = <Map<String, dynamic>>[];
-    for (final q in widget.request.questions) {
-      final sel = _selected[q.id] ?? const <String>{};
-      final custom = (_custom[q.id] ?? '').trim();
-      if (custom.isEmpty && sel.isEmpty) {
-        setState(() => _hint = L10n.t('请选择选项，或输入其他答案', 'Choose an option or type another answer'));
-        return;
-      }
-      answers.add({
-        'id': q.id,
-        'selected': custom.isEmpty ? sel.toList() : const <String>[],
-        if (custom.isNotEmpty) 'custom': custom,
-      });
-    }
-    setState(() => _submitting = true);
-    try {
-      await widget.onSubmitted(answers);
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final brand = DshColors.brand(context);
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final brandSoft = DshColors.brandSoft(context);
-    final header = widget.request.questions.isEmpty ? null : widget.request.questions.first.header;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-      decoration: BoxDecoration(
-        color: brandSoft,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: brand.withValues(alpha: 0.55)),
-      ),
-      child: ConstrainedBox(
-        // 问询卡片封顶 40% 屏高：问题说明长/选项多时卡片内滚动，不把输入框挤出屏幕
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-              children: [
-                Icon(Icons.live_help_outlined, size: 18, color: brand),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    header ?? L10n.t('需要你决定', 'Your input needed'),
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: brand),
-                  ),
-                ),
-                InkWell(
-                  onTap: _submitting ? null : widget.onCancel,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Icon(Icons.close, size: 16, color: ink3),
-                  ),
-                ),
-              ],
-            ),
-            for (final q in widget.request.questions) ...[
-              if (q.detail != null && q.detail!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4, bottom: 2),
-                  child: Text(q.detail!, style: TextStyle(fontSize: 11.5, color: ink3, height: 1.4)),
-                ),
-              Padding(
-                padding: const EdgeInsets.only(top: 6, bottom: 4),
-                child: Text(q.question, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
-              ),
-              for (final o in q.options)
-                _OptionTile(
-                  label: o.label,
-                  description: o.description,
-                  multi: q.multiSelect,
-                  selected: _selected[q.id]!.contains(o.label),
-                  onTap: () => _toggle(q, o.label),
-                ),
-              const SizedBox(height: 2),
-              TextField(
-                controller: _ctrls[q.id],
-                onChanged: (v) => _onCustom(q, v),
-                style: const TextStyle(fontSize: 13.5),
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: q.multiSelect
-                      ? L10n.t('补充说明（可选）…', 'Add details (optional)…')
-                      : L10n.t('或输入其他答案…', 'Or type another answer…'),
-                  hintStyle: TextStyle(fontSize: 13, color: ink3),
-                  filled: true,
-                  fillColor: DshColors.surface(context),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: line),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: line),
-                  ),
-                ),
-              ),
-            ],
-            if (_hint != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(_hint!, style: TextStyle(fontSize: 12, color: DshColors.danger(context))),
-              ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: _submitting ? null : widget.onCancel,
-                  child: Text(L10n.t('取消', 'Cancel'), style: TextStyle(fontSize: 13.5, color: ink2)),
-                ),
-                const SizedBox(width: 4),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 22),
-                    backgroundColor: brand,
-                  ),
-                  onPressed: _submitting ? null : _submit,
-                  child: Text(
-                      _submitting ? L10n.t('提交中…', 'Submitting…') : L10n.t('提交', 'Submit'),
-                      style: const TextStyle(fontSize: 13.5)),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-      ),
-    );
-  }
-}
-
-class _OptionTile extends StatelessWidget {
-  final String label;
-  final String? description;
-  final bool multi;
-  final bool selected;
-  final VoidCallback onTap;
-  const _OptionTile({
-    required this.label,
-    this.description,
-    required this.multi,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final brand = DshColors.brand(context);
-    final ink3 = DshColors.ink3(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              multi
-                  ? (selected ? Icons.check_box : Icons.check_box_outline_blank)
-                  : (selected ? Icons.radio_button_checked : Icons.radio_button_unchecked),
-              size: 18,
-              color: brand,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(fontSize: 13.5, fontWeight: selected ? FontWeight.w600 : FontWeight.w500),
-                  ),
-                  if (description != null && description!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 1),
-                      child: Text(description!, style: TextStyle(fontSize: 11.5, color: ink3, height: 1.35)),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// 内核权限审批弹窗卡片：工具名 + 原因 + 允许一次 / 拒绝。
 class _ApprovalCard extends StatefulWidget {
   final ApprovalRequest request;
