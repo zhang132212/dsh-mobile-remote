@@ -8,10 +8,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../api.dart';
 import '../math/view.dart';
 import '../theme.dart';
 import '../toast.dart';
+import 'link.dart';
 import 'model.dart';
+import 'sheet.dart';
 
 /// 渲染参数：字号缩放（阅读页「字号 +/−」控制），1.0 为基准。
 class DocRenderCtx {
@@ -24,9 +27,27 @@ class DocRenderCtx {
       TextStyle(fontSize: body, height: 1.7, color: DshColors.ink(c));
 }
 
-/// 打开链接：仅放行 http/https（沿用 md.dart 的安全白名单思路）。
-/// 其它 scheme（file:/intent:/tel: …）不拉起外部应用，避免被文档内容劫持。
+/// 打开链接。
+///
+/// 优先级（v3.2.1）：
+///  1. **文档链接**（`dsh-doc:` 或扩展名可读的 http(s)）→ 在**底部抽屉**里就地阅读，
+///     对话不被关闭、也不跳浏览器。这是用户明确要的手感。
+///  2. 普通 http/https → 交给系统浏览器（外部应用）。
+///  3. 其它 scheme（file:/intent:/tel: …）一律不拉起外部应用，避免被文档内容劫持。
 Future<void> openDocLink(BuildContext context, String url) async {
+  // ① 文档链接：就地打开
+  final docTarget = parseDocLink(url);
+  if (docTarget != null) {
+    await showDocSheet(
+      context,
+      name: docTarget.name,
+      localPath: docTarget.localPath,
+      httpUrl: docTarget.httpUrl,
+      api: api,
+    );
+    return;
+  }
+
   Uri uri;
   try {
     uri = Uri.parse(url.trim());

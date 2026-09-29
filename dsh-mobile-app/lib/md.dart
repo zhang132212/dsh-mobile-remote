@@ -6,6 +6,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'api.dart';
+import 'docs/link.dart';
+import 'docs/sheet.dart';
 import 'math/tex.dart';
 import 'math/view.dart';
 import 'theme.dart';
@@ -606,10 +609,41 @@ List<InlineSpan> _mdInlineSpans(String text, BuildContext context) {
     } else if (tok.startsWith('[')) {
       final mm = RegExp(r'^\[([^\]]*)\]\(([^)]*)\)$').firstMatch(tok);
       if (mm != null) {
-        final target = safeLinkUrl(mm.group(2)!);
+        final label = mm.group(1)!;
+        final rawUrl = mm.group(2)!;
+        // v3.2.1：**文档链接就地打开**——在底部抽屉里读，不跳出对话、也不惊动浏览器。
+        // 这是用户明确要的手感：「点我发的链接 → 直接开始读，对话不关」。
+        final docTarget = parseDocLink(rawUrl);
+        if (docTarget != null) {
+          spans.add(WidgetSpan(
+            alignment: PlaceholderAlignment.baseline,
+            baseline: TextBaseline.alphabetic,
+            child: GestureDetector(
+              onTap: () => showDocSheet(
+                context,
+                name: docTarget.name,
+                localPath: docTarget.localPath,
+                httpUrl: docTarget.httpUrl,
+                api: api,
+              ),
+              child: Text(
+                // 📄 前缀让「文档」一眼区别于普通网页链接
+                '📄 ${label.isEmpty ? docTarget.name : label}',
+                style: TextStyle(
+                  color: DshColors.brand(context),
+                  decoration: TextDecoration.underline,
+                  decorationColor: DshColors.brand(context),
+                ),
+              ),
+            ),
+          ));
+          last = m.end;
+          continue;
+        }
+        final target = safeLinkUrl(rawUrl);
         if (target == null) {
           // 非 http/https 链接（或解析失败）：渲染为纯文本，不可点击（v2.6.0）
-          spans.add(TextSpan(text: mm.group(1)!));
+          spans.add(TextSpan(text: label));
         } else {
           spans.add(WidgetSpan(
             alignment: PlaceholderAlignment.baseline,

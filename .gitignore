@@ -2,18 +2,22 @@ node_modules/
 *.log
 .DS_Store
 
-# Release 签名（机密，勿提交；丢失无法对已发布 APK 升级）
+# Release 绛惧悕锛堟満瀵嗭紝鍕挎彁浜わ紱涓㈠け鏃犳硶瀵瑰凡鍙戝竷 APK 鍗囩骇锛?
 dsh-mobile-app/android/key.properties
 dsh-mobile-app/android/app/*.jks
 
-# Flutter 构建产物
+# Flutter 鏋勫缓浜х墿
 dsh-mobile-app/build/
 dsh-mobile-app/android/.gradle/
 dsh-mobile-app/android/local.properties
 
-# APK 本地归档（带版本号，仅本机保留；公开分发走 GitHub Releases）
+# APK 鏈湴褰掓。锛堝甫鐗堟湰鍙凤紝浠呮湰鏈轰繚鐣欙紱鍏紑鍒嗗彂璧?GitHub Releases锛?
 dist/
 dsh-mobile-app/dist/
 
-# AGENT 规则（写给 AI 助手的项目约定，仅本机保留，不推送 GitHub）
+# AGENT 瑙勫垯锛堝啓缁?AI 鍔╂墜鐨勯」鐩害瀹氾紝浠呮湰鏈轰繚鐣欙紝涓嶆帹閫?GitHub锛?
 AGENT-RULES.md
+
+# 发布产物（由 tools/publish-manifest.mjs 生成，不进 git）
+update.json
+*.tgz

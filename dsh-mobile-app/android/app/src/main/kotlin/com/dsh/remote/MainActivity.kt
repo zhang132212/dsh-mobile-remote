@@ -71,6 +71,23 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // v3.2.1 应用内更新：把已验签的 APK 交给系统安装器。
+        // Dart 侧负责「查 manifest → 验签 → 下载 → 校验 sha256」，原生只负责最后一步安装——
+        // 权限与信任判断都留在可测试的 Dart 侧，原生不碰网络。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dsh/update")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "installApk" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrEmpty()) {
+                            result.error("bad-args", "missing path", null)
+                            return@setMethodCallHandler
+                        }
+                        result.success(installApk(path))
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         // 引擎就绪：投递冷启动暂存的面板动作
         deliverPendingAction()
         // v2.7.2 review：Dart 侧 handler 注册可能晚于本回调——延迟再投一次 + consume 兜底
@@ -206,6 +223,52 @@ class MainActivity : FlutterActivity() {
         if (docDelivered) return
         ch.invokeMethod("openDocument", doc)
         docDelivered = true
+    }
+
+    // ── v3.2.1：应用内更新——把已验签的 APK 交给系统安装器 ──────────────────
+    /**
+     * 拉起系统安装界面安装 APK。
+     *
+     * 返回 true = 已发起（装不装由用户在系统界面决定）；
+     * false = 尚未授予「安装未知来源应用」（已顺带跳到授权页），或文件不存在/拉起失败。
+     *
+     * 同签名可**覆盖安装、无需卸载**；签名不一致时系统会自行拒绝并提示，
+     * 这里不做任何绕过（绕过签名校验属于危险行为）。
+     */
+    private fun installApk(path: String): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+                // 没授权就先带用户去开，返回 false 让 Dart 侧提示「请允许安装后重试」
+                try {
+                    startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            android.net.Uri.parse("package:$packageName"),
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                } catch (_: Exception) {
+                }
+                return false
+            }
+            val file = File(path)
+            if (!file.exists() || file.length() == 0L) return false
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this,
+                "$packageName.updatefileprovider",
+                file,
+            )
+            startActivity(
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+            )
+            true
+        } catch (e: Exception) {
+            // 安装器不存在 / FileProvider 配置错 / 权限被拒——一律当作「没发起」，绝不崩
+            false
+        }
     }
 
     private fun startBubbleService() {

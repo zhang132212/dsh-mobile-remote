@@ -8,6 +8,7 @@
 //   · 导出 .docx，公式落成 Word 原生 OMML（Alt+= 可继续编辑）
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 import '../api.dart';
 import '../docs/docx_writer.dart';
@@ -25,20 +26,29 @@ class DocViewerScreen extends StatefulWidget {
   /// 文件名（含扩展名），用于判定格式
   final String name;
 
-  /// 已拿到的字节（本地文件 / 分享进入 / 聊天产物）；与 [remotePath] 二选一
+  /// 已拿到的字节（本地文件 / 分享进入 / 聊天产物）；与 [remotePath]/[httpUrl] 三选一
   final Uint8List? bytes;
 
   /// 需要从 harness 工作区拉取的文件路径
   final String? remotePath;
 
+  /// http(s) 直链（点开外部文档链接时用）
+  final String? httpUrl;
+
   /// 拉取用 API（remotePath 非空时必需）
   final Api? api;
+
+  /// 嵌入式：不套 Scaffold/AppBar，改用紧凑头部——供底部抽屉复用，
+  /// 这样在聊天里点链接就地阅读时，**对话不会被关掉**。
+  final bool embedded;
   const DocViewerScreen({
     super.key,
     required this.name,
     this.bytes,
     this.remotePath,
+    this.httpUrl,
     this.api,
+    this.embedded = false,
   });
 
   @override
@@ -73,12 +83,18 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
     try {
       var bytes = widget.bytes;
       if (bytes == null) {
-        final api = widget.api;
-        final path = widget.remotePath;
-        if (api == null || path == null) {
-          throw Exception('缺少文件来源');
+        final url = widget.httpUrl;
+        if (url != null) {
+          // 外部直链：直接下载后在本 App 内渲染（不跳浏览器）
+          bytes = await _fetchHttp(url);
+        } else {
+          final api = widget.api;
+          final path = widget.remotePath;
+          if (api == null || path == null) {
+            throw Exception('缺少文件来源');
+          }
+          bytes = await api.downloadFile(path);
         }
-        bytes = await api.downloadFile(path);
       }
       final doc = loadDocument(bytes, widget.name);
       if (!mounted) return;
@@ -94,6 +110,18 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         _loading = false;
       });
     }
+  }
+
+  /// 拉取 http(s) 文档直链。超时与体积都在 loader 那层再兜一道。
+  Future<Uint8List> _fetchHttp(String url) async {
+    final res = await http
+        .get(Uri.parse(url), headers: const {'User-Agent': 'DSH-Remote'})
+        .timeout(const Duration(seconds: 90));
+    if (res.statusCode != 200) {
+      throw Exception('下载失败 HTTP ${res.statusCode}');
+    }
+    if (res.bodyBytes.isEmpty) throw Exception('下载内容为空');
+    return res.bodyBytes;
   }
 
   /// 收集标题块下标 + 建 GlobalKey，供目录跳转。
@@ -250,6 +278,16 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
     final doc = _doc;
     if (doc != null) _ensureOutline(doc);
 
+    if (widget.embedded) {
+      // 抽屉模式：紧凑头部 + 正文。对话在抽屉下面保持存活，划下去就回到聊天。
+      return Column(
+        children: [
+          _embeddedHeader(context, doc),
+          Expanded(child: _body()),
+        ],
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -257,57 +295,90 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        actions: [
-          if (doc != null && doc.format != DocFormat.xlsx) ...[
-            IconButton(
-              tooltip: L10n.t('目录', 'Contents'),
-              onPressed: _showOutline,
-              icon: const Icon(Icons.list_alt_outlined),
-            ),
-          ],
-          PopupMenuButton<String>(
-            tooltip: L10n.t('更多', 'More'),
-            onSelected: (v) {
-              switch (v) {
-                case 'font-':
-                  setState(() => _scale = (_scale - 0.1).clamp(0.7, 2.0));
-                case 'font+':
-                  setState(() => _scale = (_scale + 0.1).clamp(0.7, 2.0));
-                case 'font0':
-                  setState(() => _scale = 1.0);
-                case 'word':
-                  _exportDocx();
-                case 'save':
-                  _saveOriginal();
-                case 'copy':
-                  _copyAll();
-              }
-            },
-            itemBuilder: (c) => [
-              PopupMenuItem(
-                value: 'font+',
-                child: Text(L10n.t('放大字号（${(_scale * 100).round()}%）', 'Larger text (${(_scale * 100).round()}%)')),
-              ),
-              PopupMenuItem(
-                value: 'font-',
-                child: Text(L10n.t('缩小字号（${(_scale * 100).round()}%）', 'Smaller text (${(_scale * 100).round()}%)')),
-              ),
-              PopupMenuItem(value: 'font0', child: Text(L10n.t('恢复默认字号', 'Reset text size'))),
-              const PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'word',
-                child: Text(L10n.t('导出 Word（公式原生）', 'Export Word (native equations)')),
-              ),
-              PopupMenuItem(value: 'save', child: Text(L10n.t('另存原文件', 'Save original file'))),
-              if (doc != null && doc.format != DocFormat.xlsx)
-                PopupMenuItem(value: 'copy', child: Text(L10n.t('复制全文', 'Copy full text'))),
-            ],
-          ),
-        ],
+        actions: _actions(doc),
       ),
       body: _body(),
     );
   }
+
+  /// 抽屉内的紧凑头部：左侧下拉提示 + 文件名 + 与全屏页一致的操作 + 关闭。
+  Widget _embeddedHeader(BuildContext context, Document? doc) {
+    final line = DshColors.line(context);
+    final ink2 = DshColors.ink2(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: line))),
+      child: Row(
+        children: [
+          Icon(Icons.drag_handle, size: 18, color: ink2),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              widget.name.split(RegExp(r'[\\/]')).last,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
+          ),
+          ..._actions(doc),
+          IconButton(
+            tooltip: L10n.t('收起', 'Close'),
+            visualDensity: VisualDensity.compact,
+            onPressed: () => Navigator.of(context).maybePop(),
+            icon: const Icon(Icons.keyboard_arrow_down),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 全屏页与抽屉共用的操作按钮。
+  List<Widget> _actions(Document? doc) => [
+        if (doc != null && doc.format != DocFormat.xlsx)
+          IconButton(
+            tooltip: L10n.t('目录', 'Contents'),
+            onPressed: _showOutline,
+            icon: const Icon(Icons.list_alt_outlined),
+          ),
+        PopupMenuButton<String>(
+          tooltip: L10n.t('更多', 'More'),
+          onSelected: (v) {
+            switch (v) {
+              case 'font-':
+                setState(() => _scale = (_scale - 0.1).clamp(0.7, 2.0));
+              case 'font+':
+                setState(() => _scale = (_scale + 0.1).clamp(0.7, 2.0));
+              case 'font0':
+                setState(() => _scale = 1.0);
+              case 'word':
+                _exportDocx();
+              case 'save':
+                _saveOriginal();
+              case 'copy':
+                _copyAll();
+            }
+          },
+          itemBuilder: (c) => [
+            PopupMenuItem(
+              value: 'font+',
+              child: Text(L10n.t('放大字号（${(_scale * 100).round()}%）', 'Larger text (${(_scale * 100).round()}%)')),
+            ),
+            PopupMenuItem(
+              value: 'font-',
+              child: Text(L10n.t('缩小字号（${(_scale * 100).round()}%）', 'Smaller text (${(_scale * 100).round()}%)')),
+            ),
+            PopupMenuItem(value: 'font0', child: Text(L10n.t('恢复默认字号', 'Reset text size'))),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: 'word',
+              child: Text(L10n.t('导出 Word（公式原生）', 'Export Word (native equations)')),
+            ),
+            PopupMenuItem(value: 'save', child: Text(L10n.t('另存原文件', 'Save original file'))),
+            if (doc != null && doc.format != DocFormat.xlsx)
+              PopupMenuItem(value: 'copy', child: Text(L10n.t('复制全文', 'Copy full text'))),
+          ],
+        ),
+      ];
 
   Widget _body() {
     if (_loading) {

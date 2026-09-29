@@ -1,0 +1,6 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- M1 review(P1-5)：APK 下载目录 = cacheDir/updates，仅暴露该子目录，
+         不以设备根/应用根作为可授予范围。 -->
+    <cache-path name="updates" path="updates/" />
+</paths>

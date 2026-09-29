@@ -10,6 +10,7 @@ import '../api.dart';
 import '../floating.dart';
 import '../l10n.dart';
 import '../logger.dart';
+import '../update/update_ui.dart';
 import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
@@ -989,6 +990,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             sub:
                 'App v${_appVersion.isEmpty ? '…' : _appVersion}'
                 ' · ${L10n.t('插件', 'plugin')} v${api.pluginVersion.isEmpty ? '…' : api.pluginVersion}',
+          ),
+          // v3.2.1：应用内更新入口——检测到新版后可直接覆盖安装（同签名，无需卸载）
+          _row(
+            leading: const Icon(Icons.system_update_alt),
+            title: L10n.t('检查更新', 'Check for updates'),
+            sub: L10n.t(
+              '有新版本会提示，可直接覆盖安装',
+              'Prompts on new versions; installs right over the current app',
+            ),
+            trailing: TextButton(
+              onPressed: () => checkUpdateInteractive(context),
+              child: Text(
+                L10n.t('检查 ▸', 'Check ▸'),
+                style: TextStyle(fontSize: 12, color: brand),
+              ),
+            ),
           ),
           _row(
             leading: const Icon(Icons.monitor_heart_outlined),

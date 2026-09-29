@@ -13,6 +13,7 @@ import 'theme.dart';
 import 'logger.dart';
 import 'scan_screen.dart';
 import 'toast.dart';
+import 'update/update_ui.dart';
 import 'screens/chat_screen.dart';
 import 'screens/doc_viewer_screen.dart';
 import 'screens/home_screen.dart';
@@ -124,6 +125,14 @@ class _DshAppState extends State<DshApp> {
       return null;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _pullPendingDoc());
+
+    // v3.2.1：启动静默检查更新——有新版才弹窗，6 小时内不重复打扰；
+    // 网络/验签失败一律静默（手动「检查更新」时才把原因告诉用户）。
+    // 延后 3 秒：等首帧与连接状态稳定后再弹，避免和启动动画/扫码引导抢注意力。
+    Future<void>.delayed(const Duration(seconds: 3), () async {
+      final c = rootNavigatorKey.currentContext;
+      if (c != null && c.mounted) await checkUpdateSilent(c);
+    });
   }
 
   /// 本轮已处理的文档指纹（避免「事件推送」与「主动拉取」双路径重复弹同一份）。
