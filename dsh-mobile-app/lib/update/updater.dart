@@ -138,6 +138,20 @@ class Updater {
     final partFile = File('$finalPath.part');
     if (partFile.existsSync()) partFile.deleteSync();
 
+    // 复用已下载且校验通过的包：用户取消安装后重试、或重复点「立即更新」时，
+    // 不该再等一次几十 MB 的下载（实测 80MB 在弱网下要十几分钟）。
+    final cached = File(finalPath);
+    if (cached.existsSync() && cached.lengthSync() == info.sizeBytes) {
+      // 流式哈希：80MB 的包不能整个读进内存
+      final h = (await sha256.bind(cached.openRead()).first).toString().toLowerCase();
+      if (h == info.sha256) {
+        onProgress?.call(1.0);
+        AppLog.instance.log('[update] 复用已校验的本地安装包：$finalPath');
+        return cached;
+      }
+      cached.deleteSync(); // 内容不符（半成品/被替换）→ 删掉重下
+    }
+
     final client = http.Client();
     try {
       final req = http.Request('GET', Uri.parse(info.apkUrl))

@@ -11,6 +11,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../l10n.dart';
 import '../logger.dart';
+import '../md.dart';
 import '../theme.dart';
 import '../toast.dart';
 import 'updater.dart';
@@ -92,13 +93,26 @@ Future<void> _promptUpdate(BuildContext context, UpdateInfo info) async {
     builder: (c) => AlertDialog(
       title: Text(L10n.t('发现新版本 v${info.versionName}', 'New version v${info.versionName}')),
       content: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 320),
+        constraints: const BoxConstraints(maxHeight: 380),
         child: SingleChildScrollView(
-          child: Text(
-            info.notes.trim().isEmpty
-                ? L10n.t('（本次发布未填写更新说明）', '(no release notes)')
-                : info.notes.trim(),
-            style: const TextStyle(fontSize: 13, height: 1.5),
+          // 更新说明本身就是 Markdown（Release notes），必须按 Markdown 渲染——
+          // 否则用户看到的是裸露的 `##`、`-`、反引号（模拟器实测踩中）。
+          // 顺便缩到 0.85 倍：弹窗里正文 15px 偏大。
+          child: MediaQuery.withClampedTextScaling(
+            minScaleFactor: 0.85,
+            maxScaleFactor: 0.85,
+            child: Builder(
+              builder: (c) {
+                final notes = info.notes.trim();
+                if (notes.isEmpty) {
+                  return Text(L10n.t('（本次发布未填写更新说明）', '(no release notes)'));
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: renderMarkdownBlocks(notes, c),
+                );
+              },
+            ),
           ),
         ),
       ),

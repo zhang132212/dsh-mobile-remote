@@ -5,7 +5,12 @@
 //   node tools/publish-manifest.mjs \
 //     --tag v3.2.1 --sequence 4 \
 //     [--apk <path>] [--plugin <tgz>] [--notes <file>] \
+//     [--version-name x.y.z] [--version-code N] \
 //     [--repo owner/name] [--upload]
+//
+// --version-name / --version-code：给**已发布的历史 tag 补签清单**用。
+//   pubspec 已前进到新版本时，默认值会串味（tag=v3.2.1 却写成 3.2.2），
+//   此时显式指定即可在不回退 pubspec 的前提下修正旧 release 的 update.json。
 //
 // 做了什么：
 //   1. 校验三处版本一致（pubspec versionName / +versionCode / tag）；
@@ -130,10 +135,16 @@ async function main() {
   const tag = args.tag ?? die('缺少 --tag')
   const sequence = Number(args.sequence ?? die('缺少 --sequence（必须单调递增）'))
 
-  const { versionName, versionCode } = readPubspec()
+  const pub = readPubspec()
+  // 默认取 pubspec；--version-name / --version-code 可覆盖，
+  // 用于给历史 tag 补签清单（pubspec 已前进时不至于串味）。
+  // 另：只改 versionCode 而不动 APK 本体，可在真机上演练
+  // 「有新版 → 提示 → 下载 → 安装」而无需再打一个包。
+  const versionName = args['version-name'] ?? pub.versionName
   const pluginVersion = readPluginVersion().versionName
+  const versionCode = args['version-code'] ? Number(args['version-code']) : pub.versionCode
   if (tag !== `v${versionName}` && !args.skipTagCheck) {
-    die(`tag 与 pubspec 版本不一致：tag=${tag} pubspec=v${versionName}`)
+    die(`tag 与版本不一致：tag=${tag} versionName=${versionName}（可用 --version-name 覆盖）`)
   }
 
   const apk = args.apk ?? die('缺少 --apk')
