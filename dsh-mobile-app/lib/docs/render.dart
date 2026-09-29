@@ -6,9 +6,12 @@
 // （不用全局槽位——那样 rebuild 顺序一变就取错主题色）。
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api.dart';
+import '../logger.dart';
 import '../math/view.dart';
 import '../theme.dart';
 import '../toast.dart';
@@ -17,9 +20,17 @@ import 'model.dart';
 import 'sheet.dart';
 
 /// 渲染参数：字号缩放（阅读页「字号 +/−」控制），1.0 为基准。
+///
+/// v3.2.4：图片链路要落地，光有 scale 不够 —— 渲染器还需要「去哪儿取图」：
+///   · [api]     ：按绝对路径把字节从电脑上拉下来（走 /api/files）
+///   · [baseDir] ：本地文档所在目录，用于解析 `![](图/x.png)` 这类相对路径
+///   · [baseUrl] ：网络文档的基址，用于解析相对图片 URL
 class DocRenderCtx {
   final double scale;
-  const DocRenderCtx({this.scale = 1.0});
+  final Api? api;
+  final String? baseDir;
+  final String? baseUrl;
+  const DocRenderCtx({this.scale = 1.0, this.api, this.baseDir, this.baseUrl});
 
   double get body => 15.0 * scale;
 
@@ -224,7 +235,7 @@ class _RichBlock extends StatelessWidget {
       _ => TextAlign.start,
     };
     return Text.rich(
-      TextSpan(children: inlineSpans(context, spans, style, ctx.scale), style: style),
+      TextSpan(children: inlineSpans(context, spans, style, ctx), style: style),
       style: style,
       textAlign: textAlign,
     );
@@ -235,7 +246,7 @@ class _RichBlock extends StatelessWidget {
 ///
 /// 公式与链接用 WidgetSpan（公式需要真正的排版盒子；链接需要点击热区），
 /// 其余为 TextSpan。WidgetSpan 一律按基线对齐，避免行高被撑破。
-List<InlineSpan> inlineSpans(BuildContext c, List<DocInline> spans, TextStyle base, double scale) {
+List<InlineSpan> inlineSpans(BuildContext c, List<DocInline> spans, TextStyle base, DocRenderCtx ctx) {
   final out = <InlineSpan>[];
   for (final s in spans) {
     switch (s) {
@@ -306,31 +317,213 @@ List<InlineSpan> inlineSpans(BuildContext c, List<DocInline> spans, TextStyle ba
           child: InlineMath(tex, style: base.copyWith(fontSize: (base.fontSize ?? 15) * 1.02)),
         ));
 
-      case DocImage(:final alt):
+      case DocImage(:final url, :final alt):
+        // v3.2.4：真渲染图片（此前只画一个占位 chip）
         out.add(WidgetSpan(
           alignment: PlaceholderAlignment.middle,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: DshColors.line(c),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.image_outlined, size: 13 * scale, color: DshColors.ink2(c)),
-                const SizedBox(width: 3),
-                Text(
-                  alt ?? '图片',
-                  style: base.copyWith(fontSize: (base.fontSize ?? 15) * 0.85, color: DshColors.ink2(c)),
-                ),
-              ],
-            ),
-          ),
+          child: DocImageView(src: url, alt: alt, ctx: ctx, base: base),
         ));
     }
   }
   return out;
+}
+
+/// 把文档里的图片 src 解析成**电脑上的绝对路径**（解析不出来返回 null）。
+///
+/// 必须用 `p.windows` 上下文：文档都在电脑上，是 Windows 路径；
+/// 而 App 跑在 Android（POSIX）。默认上下文下 `p.dirname(r'D:\a\b.md')`
+/// 会因为找不到 `/` 而返回 `.`，拼出来就是 `./图.png` —— 取图必然 ENOENT。
+/// （真机实测踩中：日志里出现 `DocImage: 按路径取图失败 ./图5-受控源电路.png`。）
+String? resolveDocImagePath({required String src, String? baseDir}) {
+  final s = src.trim();
+  if (s.isEmpty) return null;
+  final win = p.windows;
+  final norm = s.replaceAll('\\', '/');
+  if (win.isAbsolute(norm)) return norm;
+  final base = baseDir ?? '';
+  if (base.isEmpty) return null;
+  return win.join(base, norm);
+}
+
+/// 文档里的图片（v3.2.4）。
+///
+/// 此前文档里的图片只会渲染成一个「🖼 文件名」占位 chip，原因是三处叠加：
+///   ① markdown 解析器**根本不认 `![](…)`**（图片语法被当普通文字）；
+///   ② docx 读取器把图片二进制丢了（`DocImage(null, …)`）；
+///   ③ 这里的 DocImage 分支只用了 alt，且 DocRenderCtx 手里没有取图能力。
+/// 现在 ①③ 已补齐（docx 内嵌图见后续），本 widget 负责**按 src 取字节真渲染**。
+///
+/// 取不到图时**退回占位 chip** —— 对齐「绝不吞内容」：宁可显示文件名，也不留空白。
+class DocImageView extends StatefulWidget {
+  final String? src;
+  final String? alt;
+  final DocRenderCtx ctx;
+  final TextStyle base;
+  const DocImageView({
+    super.key,
+    required this.src,
+    required this.alt,
+    required this.ctx,
+    required this.base,
+  });
+
+  @override
+  State<DocImageView> createState() => _DocImageViewState();
+}
+
+class _DocImageViewState extends State<DocImageView> {
+  /// 进程内缓存：同一张图在正文/目录里重复出现时不重复下载。
+  static final Map<String, Uint8List> _cache = <String, Uint8List>{};
+  static const int _cacheCap = 24;
+
+  Uint8List? _bytes;
+  bool _done = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(DocImageView old) {
+    super.didUpdateWidget(old);
+    if (old.src != widget.src) {
+      _done = false;
+      _bytes = null;
+      _load();
+    }
+  }
+
+  static void _remember(String key, Uint8List bytes) {
+    if (_cache.length >= _cacheCap) _cache.remove(_cache.keys.first);
+    _cache[key] = bytes;
+  }
+
+  void _hit(String key, Uint8List bytes) {
+    _remember(key, bytes);
+    if (mounted) {
+      setState(() {
+        _bytes = bytes;
+        _done = true;
+      });
+    }
+  }
+
+  Future<void> _load() async {
+    final src = (widget.src ?? '').trim();
+    if (src.isEmpty) {
+      if (mounted) setState(() => _done = true);
+      return;
+    }
+
+    final uri = Uri.tryParse(src);
+    final isHttp = uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
+
+    // ① 网络图：绝对 URL，或相对 URL 按文档基址解析
+    if (isHttp) {
+      await _fromNetwork(uri);
+      return;
+    }
+    final baseUrl = widget.ctx.baseUrl;
+    if (uri != null && !uri.hasScheme && baseUrl != null && baseUrl.isNotEmpty) {
+      final base = Uri.tryParse(baseUrl);
+      if (base != null) {
+        await _fromNetwork(base.resolveUri(uri));
+        return;
+      }
+    }
+
+    // ② 本地文件：绝对路径直接用；相对路径按「文档所在目录」拼
+    final abs = resolveDocImagePath(src: src, baseDir: widget.ctx.baseDir);
+    final api = widget.ctx.api;
+    if (abs != null && api != null) {
+      final hit = _cache[abs];
+      if (hit != null) {
+        _hit(abs, hit);
+        return;
+      }
+      try {
+        final bytes = await api.downloadFile(abs);
+        if (bytes.isNotEmpty) {
+          _hit(abs, bytes);
+          return;
+        }
+      } catch (e) {
+        AppLog.instance.log('DocImage: 按路径取图失败 $abs → $e');
+      }
+    }
+    if (mounted) setState(() => _done = true);
+  }
+
+  Future<void> _fromNetwork(Uri uri) async {
+    final key = uri.toString();
+    final hit = _cache[key];
+    if (hit != null) {
+      _hit(key, hit);
+      return;
+    }
+    try {
+      final r = await http.get(uri).timeout(const Duration(seconds: 20));
+      if (r.statusCode == 200 && r.bodyBytes.isNotEmpty) {
+        _hit(key, r.bodyBytes);
+        return;
+      }
+    } catch (e) {
+      AppLog.instance.log('DocImage: 下载图片失败 $key → $e');
+    }
+    if (mounted) setState(() => _done = true);
+  }
+
+  /// 取不到图时的占位（保留原有的「🖼 文件名」观感）。
+  Widget _placeholder({required bool loading}) {
+    final c = context;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: DshColors.line(c),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.image_outlined, size: 13 * widget.ctx.scale, color: DshColors.ink2(c)),
+          const SizedBox(width: 3),
+          Text(
+            loading ? '加载图片…' : (widget.alt ?? widget.src ?? '图片'),
+            style: widget.base.copyWith(
+              fontSize: (widget.base.fontSize ?? 15) * 0.85,
+              color: DshColors.ink2(c),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _bytes;
+    if (bytes == null) return _placeholder(loading: !_done);
+
+    // 单独成段的图片给足宽度；行内图片也不会撑破屏幕。
+    final screen = MediaQuery.of(context).size.width;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: (screen - 48).clamp(120.0, 1200.0),
+          maxHeight: 520,
+        ),
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          alignment: Alignment.centerLeft,
+          gaplessPlayback: true,
+        ),
+      ),
+    );
+  }
 }
 
 Color? _parseColor(String hex) {
@@ -478,7 +671,7 @@ Widget _cell(
       ),
     ),
     child: Text.rich(
-      TextSpan(children: inlineSpans(c, cell.spans, style, ctx.scale), style: style),
+      TextSpan(children: inlineSpans(c, cell.spans, style, ctx), style: style),
       style: style,
       textAlign: align,
     ),

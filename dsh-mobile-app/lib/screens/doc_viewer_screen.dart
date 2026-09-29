@@ -9,6 +9,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 
 import '../api.dart';
 import '../docs/docx_writer.dart';
@@ -416,7 +417,15 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
     final doc = _doc;
     if (doc == null) return const SizedBox.shrink();
 
-    final ctx = DocRenderCtx(scale: _scale);
+    // v3.2.4：把「去哪儿取图」交给渲染器 ——
+    // 本地文档用所在目录解析 `![](图/x.png)`，网络文档用其基址解析相对 URL。
+    // 必须用 p.windows：文档在电脑上，是 Windows 路径（App 本身跑在 Android）。
+    final ctx = DocRenderCtx(
+      scale: _scale,
+      api: widget.api,
+      baseDir: widget.remotePath == null ? null : p.windows.dirname(widget.remotePath!),
+      baseUrl: widget.httpUrl,
+    );
 
     // 电子表格：多表用 Tab 切换
     final sheet = doc.sheet;
