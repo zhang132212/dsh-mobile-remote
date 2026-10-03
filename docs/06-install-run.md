@@ -42,9 +42,9 @@ graph LR
 **方式 A（推荐，已实测）—— 本地 clone + `file:` 依赖**：
 
 ```powershell
-git clone https://github.com/201222-L/dsh-mobile-remote.git
-# 锁版本（推荐）：tag 与版本号一致；不 checkout 则跟随最新 main
-git -C dsh-mobile-remote checkout v3.0.0
+git clone https://github.com/zhang132212/dsh-mobile-remote.git
+# 锁定发布代码（推荐）：tag 标识 App 与插件的配套发布，两端版本号可以不同
+git -C dsh-mobile-remote checkout v3.2.2
 # profile package.json:
 #   "dsh-mobile-remote": "file:<clone 出来的路径>"
 corepack pnpm install
@@ -53,16 +53,16 @@ corepack pnpm install
 **方式 B（快捷，免手动 clone）—— 直接写 GitHub 地址，`pnpm install` 自动下载**：
 
 ```json
-{ "dependencies": { "dsh-mobile-remote": "github:201222-L/dsh-mobile-remote" } }
+{ "dependencies": { "dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote" } }
 ```
 
-**锁定指定版本**（推荐：App 与插件版本保持一致）—— 用 git tag 固定：
+**锁定指定 Release**（推荐：使用同一 Release 的 App 与插件）—— 用 git tag 固定：
 
 ```json
-{ "dependencies": { "dsh-mobile-remote": "github:201222-L/dsh-mobile-remote#v3.0.0" } }
+{ "dependencies": { "dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.2" } }
 ```
 
-**方式 C —— 下载 Release 里的插件包离线安装**：GitHub Releases 的 `dsh-mobile-remote-vX.Y.Z.tgz` 下载后：
+**方式 C —— 下载 Release 里的插件包离线安装**：[GitHub Releases](https://github.com/zhang132212/dsh-mobile-remote/releases/latest) 的插件 `.tgz` 附件（以实际名称为准；v3.2.2 为 `dsh-mobile-remote-3.1.5-eun.1.tgz`） 下载后：
 
 ```powershell
 # profile package.json:
@@ -70,7 +70,7 @@ corepack pnpm install
 corepack pnpm install
 ```
 
-> 版本匹配规则：**App 与插件同版本 = 完美配对**；不同版本也能用（谁旧谁吃亏，但都不崩），详见 README「版本与兼容」。实际配对在 App 设置 → 关于 → 版本查看。
+> 版本匹配规则：**App 与插件独立版本，以同一 Release 的配套产物为准**。v3.2.2 对应 App `3.2.2+25` 与插件 `3.1.5-eun.1`；跨 Release 配对按 API 能力协商，详见 README「版本与兼容」。实际配对在 App 设置 → 关于 → 版本查看。
 > 方式 B 依赖网络能访问 GitHub 与 npm（含插件依赖 `qrcode`、`@deepseek-ai/*` 的公开解析；后者桌面端为内置打包、公开 npm 可解析性未逐一验证，遇解析失败请改用方式 A/C）。
 > 更新插件时：方式 A 重新 `git pull` 后 `pnpm install`；方式 B 改 tag 后 `pnpm install`；方式 C 换新 tgz 重装。
 
@@ -259,7 +259,7 @@ mkcert 192.168.1.100 172.16.x.x # 给电脑的局域网/组网 IP 签证书
 > 源码：`dsh-mobile-app/` 子目录（独立 Flutter 工程，与插件同仓库发布）。
 ### 8.0 安装 App（推荐：直接下载 APK）
 
-**无需编译环境**：从 [GitHub Releases](https://github.com/201222-L/dsh-mobile-remote/releases/latest) 下载 `DSH-Remote-*.apk`（正式签名）传到手机安装即可。愿意自己改代码/构建的开发者见 §8.2。
+**无需编译环境**：从 [GitHub Releases](https://github.com/zhang132212/dsh-mobile-remote/releases/latest) 下载 `.apk` 附件（以实际名称为准）（正式签名）传到手机安装即可。愿意自己改代码/构建的开发者见 §8.2。
 ### 8.1 架构
 
 App = **原生 Flutter 应用**（非 WebView）：全部界面用 Flutter 原生组件绘制，与插件 `/m/api` 共享同一套 API 与设计令牌（DeepSeek 配色）。

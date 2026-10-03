@@ -67,7 +67,7 @@
 
 ## 安装（部署者 3 步）
 
-> 🤖 **让 DSH 的 agent 自动安装**：直接告诉 agent「按本仓库 docs/06 安装 dsh-mobile-remote 插件」即可。agent 默认会采用下面的「方式一」，拉取的就是**当前正式版**（main 分支永远保持完整可发布状态，版本号与最新 Release 一致）。需要与手机 App 精确配对时，把依赖写成 `"dsh-mobile-remote": "github:201222-L/dsh-mobile-remote#v3.0.0"`。
+> 🤖 **让 DSH 的 agent 自动安装**：直接告诉 agent「按本仓库 docs/06 安装 dsh-mobile-remote 插件」即可。main 为维护分支，可能包含发布后的改动；安装已发布的配套代码时，应按 Release tag 锁定。例如 v3.2.2，把依赖写成 `"dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.2"`。
 
 ### 方式一：命令行 dsh web（web 版流程）
 
@@ -177,7 +177,7 @@ pushUrls:
 
 ## 手机使用
 
-0. **下载 App**：[GitHub Releases](https://github.com/201222-L/dsh-mobile-remote/releases/latest) 下载 `DSH-Remote-vX.Y.Z.apk` 安装（或按 dsh-mobile-app/README 自行构建）
+0. **下载 App**：[GitHub Releases](https://github.com/zhang132212/dsh-mobile-remote/releases/latest) 下载 Release 附件中的 `.apk` 安装（或按 dsh-mobile-app/README 自行构建）
 1. 与电脑同一 WiFi；**人不在家**用蒲公英组网等虚拟组网方案（已实测，见 docs/06 §5，App 自动切换地址）
 2. 打开 App →「扫码连接」对准桌面 dsh 设置页二维码（或手动输地址+口令）
 3. 首页直接发消息派活；对话页实时流式回复；通知页看完成/提问/失败
@@ -217,17 +217,17 @@ pushUrls:
 
 ## 版本与兼容
 
-- **版本号统一**：App 版本 = 插件版本 = git tag（如 `v3.0.0` = App 3.0.0+5 + 插件 3.0.0）。GitHub Releases 每个版本同时提供两个附件：`DSH-Remote-vX.Y.Z.apk`（手机装）与 `dsh-mobile-remote-vX.Y.Z.tgz`（电脑插件包，`pnpm add <路径>` 或 `npm install -g` 安装）。
+- **分离版本**：App 版本由 `dsh-mobile-app/pubspec.yaml` 定义，插件版本由根目录 `package.json` 定义，两者独立演进。Release/git tag 标识一组发布代码，当前 tag 跟随 App 版本，不要求等于插件版本。正式 Release `v3.2.2` 对应 **App `3.2.2+25` + 插件 `3.1.5-eun.1`**；请从同一 [Release](https://github.com/zhang132212/dsh-mobile-remote/releases/tag/v3.2.2) 下载 `.apk` 和插件 `.tgz` 附件，以附件实际名称为准。
 - **版本差矩阵**（一句话：谁旧谁吃亏，但都不崩）：
 
 | 组合 | 结果 |
 |---|---|
-| 同版本 | ✅ 完美 |
+| 同一 Release 的 App + 插件 | ✅ 配套发布（两端版本号可以不同） |
 | 插件新 + App 旧 | ✅ 老功能正常，新功能不可见（协议只加不删，未知帧一律忽略） |
 | App 新 + 插件旧 | ✅ 老功能正常，新功能提示升级 |
 | 破坏性变更 | ❌ 禁止——已发布接口只加字段（docs/08 约定） |
 
-- 插件源码按 git tag 锁定版本：`"dsh-mobile-remote": "github:201222-L/dsh-mobile-remote#v3.0.0"`（不带 `#` 取最新）。
+- 插件源码按 git tag 锁定版本：`"dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.2"`（不带 `#` 跟随默认分支，不保证与某个 Release 完全一致）。
 - 实际配对可在 App **设置 → 关于 → 版本**（`App vX · 插件 vY`）或环境诊断页对照。
 
 ## 文档

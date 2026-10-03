@@ -35,11 +35,11 @@
 
 ## 发布新版本（维护者清单）
 
-**版本号统一原则**：App 版本（pubspec）= 插件版本（package.json）= git tag（如 `v3.0.0` = App 3.0.0+6 + 插件 3.0.0）。**任何一端改动都要三处一起 bump 到同一个新版本号。**
+**分离版本原则**：App 的 `pubspec.yaml` 与插件的 `package.json` 独立版本；仅为有发布改动的一端 bump。Release/git tag 标识配套代码，当前 tag 跟随 App 版本。`v3.2.2` 对应 App `3.2.2+25` 与插件 `3.1.5-eun.1`；Release 说明须写明两端版本，不能按数字相等判断兼容。文档修正无需 bump 产品版本。
 
-**main 分支完整性约定**：main **永远保持完整可发布状态**——每次合并前必须完成：版本号已 bump、CHANGELOG 已更新、`flutter analyze`/`node --check` 通过；不推半成品。这样"拉最新 main"（普通用户让 agent 自动安装的默认路径）拿到的永远是当前正式版，与最新 Release 一致。破坏性/实验性改动走分支或 PR，不进 main。
+**main 分支完整性约定**：main **永远保持完整可发布状态**——每次合并前必须完成：涉及发布的端已 bump 版本、功能改动已更新 CHANGELOG、`flutter analyze`/`node --check` 通过；不推半成品。main 是维护分支，可以包含发布后的改动；安装正式版应锁定 Release tag。已发布的代码必须同步回 main。破坏性/实验性改动走分支或 PR，不进 main。
 
-**插件改动（电脑端）**：改 `lib/index.js` → `node --check` → 同步安装目录并重启实测 → `package.json` 版本号（与 App 同步）→ CHANGELOG 条目。
+**插件改动（电脑端）**：改 `lib/index.js` → `node --check` → 同步安装目录并重启实测 → `package.json` 版本号（独立于 App）→ CHANGELOG 条目。
 
 **App 改动（手机端）**：改代码 → `flutter analyze` + `flutter test` → `flutter build apk --release` + 真机实测 → `pubspec.yaml` 版本号（形如 `2.5.2+1`）。
 
@@ -47,13 +47,13 @@
 1. 文档同步（API/行为变化时更新 docs/03 等）
 2. `git commit`（一句话说明改动）+ `git push origin main`
 3. `git tag -a vX.Y.Z -m "..."` + `git push origin main --tags`
-4. **本地归档**：运行 `dsh-mobile-app\tools\package-release.ps1` → 生成两个带版本号的文件：`dist\DSH-Remote-vX.Y.Z.apk`（App）与 `dist\dsh-mobile-remote-vX.Y.Z.tgz`（插件包）
+4. **本地归档**：运行 `dsh-mobile-app\tools\package-release.ps1` → 生成 APK 与插件包（两端版本号独立；以实际产物名为准），插件包名采用插件自己的版本号，不从 App/tag 版本推断
 5. GitHub 网页创建 **Release**：选新 tag → 标题 `DSH Remote vX.Y.Z` → 说明写清本次改动 → **同时上传上面两个附件**
 6. 大更新在 DSH 社区发帖；CHANGELOG 保持完整历史
 
 **版本保留原则**：
 - **旧版 Release 永远保留不删**——它们是版本历史，用户可自行选择下载任一版本回退；每次只**新增**一条 Release（选新 tag），新版本自动成为 Latest
-- 每次改动**必须三处同步 bump 版本号**（pubspec / package.json / CHANGELOG），否则新旧包无法区分
+- 发布时更新有改动的一端版本号，并在 CHANGELOG/Release 说明列出 App 与插件的配套版本
 - 同一签名覆盖安装，用户升级无痛；换 keystore 除外（= 换应用）
 
-> 提醒：手机侧载安装无自动更新，重要修复在 Release 说明里写醒目；**不要更换签名 keystore**（同签名覆盖安装保留连接信息）。
+> 提醒：v3.2.1 起 App 支持应用内更新，更新源为 `zhang132212/dsh-mobile-remote`；更早版本需手动下载 APK。重要修复在 Release 说明里写醒目；**不要更换签名 keystore**（同签名覆盖安装保留连接信息）。

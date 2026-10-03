@@ -12,7 +12,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import fs, { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { apply, validateQuestionAnswers, summarizeEvent } from "../lib/index.js";
@@ -541,4 +543,30 @@ test('subagent messages keep typed provenance in history and live summaries', ()
   assert.equal(summary.data.sourceKind, 'subagent-report');
   assert.equal(summary.data.senderSessionId, 'child-A');
   assert.equal(summary.data.sourceForm, 'relay');
+});
+
+test('/files: asynchronous read failure closes the response without crashing the server', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'dsh-download-'));
+  const file = join(directory, 'download.txt');
+  writeFileSync(file, 'fixture');
+  const stream = new PassThrough();
+  const mocked = t.mock.method(fs, 'createReadStream', () => stream);
+  syncBuiltinESMExports();
+  const harness = createHarness();
+  const response = new FakeResponse();
+  try {
+    harness.route(new FakeRequest(`/m/api/files?path=${encodeURIComponent(file)}`, 'GET'), response);
+    await waitFor(() => response.headersSent);
+    const closed = new Promise(resolve => response.once('close', resolve));
+    stream.destroy(Object.assign(new Error('file disappeared after stat'), { code: 'ENOENT' }));
+    await closed;
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.destroyed, true);
+    assert.equal(stream.destroyed, true);
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+    harness.clean();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
