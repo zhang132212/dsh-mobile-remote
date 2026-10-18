@@ -5,6 +5,7 @@ import '../toast.dart';
 import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
+import '../tui.dart';
 import '../fmt.dart';
 import 'chat_screen.dart';
 import 'doc_browser_screen.dart';
@@ -78,26 +79,48 @@ class _HomeScreenState extends State<HomeScreen> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // 官方 logo（DeepSeek 官网 favicon 转 PNG，蓝鲸标志）
-                          Image.asset(
-                            'assets/deepseek-logo.png',
-                            width: 84,
-                            height: 84,
-                          ),
-                          const SizedBox(height: 10),
-                          // 欢迎
-                          Text(
-                            L10n.t('今天打算设计什么？', 'What are you designing today?'),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 30,
-                              height: 1.35,
-                              fontWeight: FontWeight.w700,
-                              fontFamily: 'Georgia',
-                              color: Theme.of(context).colorScheme.onSurface,
+                          // TUI banner（对齐 dsh-tui 的启动横幅）：方框线 + 蓝鲸 logo + 会话信息
+                          TuiFrame(
+                            title: 'dsh-remote',
+                            accent: DshColors.brand(context),
+                            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                            child: Row(
+                              children: [
+                                Image.asset('assets/deepseek-logo.png', width: 44, height: 44),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        L10n.t('今天打算设计什么？', 'What are you designing today?'),
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          height: 1.3,
+                                          fontFamily: DshTheme.mono,
+                                          fontWeight: FontWeight.w700,
+                                          color: DshColors.ink(context),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        store.workspaceTitle ?? L10n.t('未选择工作区', 'no workspace'),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          height: 1.3,
+                                          fontFamily: DshTheme.mono,
+                                          color: DshColors.muted(context),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 16),
                           // 最近会话卡
                           Container(
                             decoration: BoxDecoration(

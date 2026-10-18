@@ -551,8 +551,10 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
             Text(
               titles[_index],
               style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                fontFamily: DshTheme.mono,
+                letterSpacing: 0.3,
               ),
             ),
           ],
@@ -587,7 +589,15 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('DSH', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, fontFamily: 'Georgia')),
+                    const Text(
+                      'dsh-remote',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: DshTheme.mono,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     FilledButton(
                       style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(42)),

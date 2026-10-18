@@ -16,6 +16,7 @@ import '../store.dart';
 import '../timeline.dart';
 import '../theme.dart';
 import '../md.dart';
+import '../tui.dart';
 import '../fmt.dart';
 import 'sheets.dart';
 import 'harness_question_card.dart';
@@ -2173,53 +2174,43 @@ class _ChatScreenState extends State<ChatScreen> {
     final store = widget.store;
     final ink3 = DshColors.ink3(context);
     final brand = DshColors.brand(context);
-    final surface = DshColors.surface(context);
 
+    // ── TUI 布局：AppBar 让位给「单行状态栏 + 统计行」（dsh-tui 的 status bar / stats line）──
+    final tuiStatus = store.connState == 'connected' ? _pageAgentStatus : 'offline';
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Row(
-          children: [
-            Flexible(
-              child: Text(_title ?? L10n.t('会话', 'Session'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-            ),
-            const SizedBox(width: 8),
-            _StatusDot(status: store.connState == 'connected' ? _pageAgentStatus : 'offline'),
-          ],
-        ),
-        actions: [
-          // v2.7：会话工具（任务 / 子代理 / 目标）
-          IconButton(
-            icon: const Icon(Icons.assignment_outlined, size: 20),
-            tooltip: L10n.t('任务 / 子代理 / 目标', 'Tasks / Subagents / Goals'),
-            onPressed: () {
-              final sid = _mySessionId;
-              if (sid != null) showSessionToolsSheet(context, widget.store, sid, onTitleChanged: widget.onTitleChanged);
-            },
-          ),
-          // v3.1.5（issue #15）：会话级复制入口（范围=当前已加载的消息，见 _conversationText）
-          IconButton(
-            icon: const Icon(Icons.copy_all, size: 20),
-            tooltip: L10n.t('复制当前已加载的对话', 'Copy loaded conversation'),
-            onPressed: _copyConversation,
-          ),
-        ],
-      ),
       body: Column(
         children: [
-          // 用量条
-          if (_usageLoaded && _usage.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
-              child: Text(
-                _fmtUsage(_usage),
-                style: TextStyle(fontSize: 11.5, color: ink3),
-              ),
+          SafeArea(
+            bottom: false,
+            child: TuiStatusBar(
+              onBack: () => Navigator.of(context).pop(),
+              sessionCode: _tuiSessionCode(),
+              model: _tuiModelShort(store.sessionConfig.model),
+              preset: _tuiPermShort(store.sessionConfig.permissionPreset),
+              status: tuiStatus,
+              actions: [
+                // v2.7：会话工具（任务 / 子代理 / 目标）——TUI 的 Ctrl+O 等价入口
+                IconButton(
+                  icon: const Icon(Icons.assignment_outlined, size: 17),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+                  tooltip: L10n.t('任务 / 子代理 / 目标', 'Tasks / Subagents / Goals'),
+                  onPressed: _openToolsFromKey,
+                ),
+                // v3.1.5（issue #15）：会话级复制入口（范围=当前已加载的消息，见 _conversationText）
+                IconButton(
+                  icon: const Icon(Icons.copy_all, size: 17),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+                  tooltip: L10n.t('复制当前已加载的对话', 'Copy loaded conversation'),
+                  onPressed: _copyConversation,
+                ),
+              ],
             ),
+          ),
+          // 统计行：token 用量 / 缓存命中 / 上下文占用 / 消息数（等宽小字一行，横向可滑）
+          TuiStatsLine(parts: _tuiStatsParts()),
           // v2.8.0：后台任务卡片移到对话框顶部（不再与问询/审批卡堆在底部），可收纳、默认收起
           if (!_inHistory && widget.store.hasRunningJobs(_mySessionId ?? ''))
             _JobCard(
@@ -2324,138 +2315,112 @@ class _ChatScreenState extends State<ChatScreen> {
           if (!_inHistory) _buildTodoPanel(),
           // v2.7.2：队列停靠区（独立于输入框的轻量条，空队列不渲染）
           _buildQueueDock(),
-          // composer（v2.8.0 重构为两层，对齐 PC 端 InputBar）：
-          // 第一层 = [/命令] + 输入框（独占最宽）；第二层 = 模型/权限/排队胶囊 + 上下文圆环 + 发送
+          // ── TUI 提示符框（dsh-tui 的 editor 区域）──
+          // 方框线 + `>` 提示符 + 键位条；按键分布 = Enter 发送 / Ctrl+C 中断 /
+          // Shift+Tab 权限循环 / Ctrl+O 工具卡 / `/` 命令 / model 切换
           SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
-                decoration: BoxDecoration(
-                  color: surface,
-                  border: Border.all(color: DshColors.line(context)),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: Theme.of(context).brightness == Brightness.dark ? DshTheme.shadowDark : DshTheme.shadow,
-                ),
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+              child: TuiFrame(
+                title: _tuiComposerTitle(),
+                accent: _pageAgentStatus == 'running' ? DshColors.cyan(context) : null,
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 第一层：输入框（独占最宽）
+                    // 提示符行：`>` + 输入框 + 上下文占用 + Enter / Ctrl+C
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6, top: 7, bottom: 7),
+                          child: Text(
+                            kTuiPrompt,
+                            style: TextStyle(
+                              fontFamily: DshTheme.mono,
+                              fontSize: 14,
+                              height: 1.3,
+                              fontWeight: FontWeight.w700,
+                              color: DshColors.cyan(context),
+                            ),
+                          ),
+                        ),
                         Expanded(
                           child: TextField(
                             controller: _inputCtrl,
                             minLines: 1,
                             maxLines: 4,
-                            style: const TextStyle(fontSize: 14.5),
+                            style: const TextStyle(fontSize: 14, height: 1.45),
+                            cursorColor: DshColors.cyan(context),
+                            cursorWidth: 2,
                             decoration: InputDecoration(
-                              hintText: L10n.t('回复 agent…', 'Reply to agent…'),
-                              hintStyle: TextStyle(color: ink3),
+                              hintText: L10n.t('输入消息，Enter 发送…', 'Type a message, Enter to send…'),
+                              hintStyle: TextStyle(color: ink3, fontSize: 12.5),
                               filled: false,
+                              isDense: true,
                               border: InputBorder.none,
                               enabledBorder: InputBorder.none,
                               focusedBorder: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                              contentPadding: const EdgeInsets.symmetric(vertical: 9),
                             ),
                             onSubmitted: (_) => _send(),
                           ),
                         ),
+                        if (_contextRatio != null)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6, bottom: 10),
+                            child: Text(
+                              'ctx ${(_contextRatio! * 100).round()}%',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontFamily: DshTheme.mono,
+                                color: _contextRatio! >= 0.9
+                                    ? DshColors.danger(context)
+                                    : (_contextRatio! >= 0.7 ? DshColors.warn(context) : DshColors.ok(context)),
+                              ),
+                            ),
+                          ),
+                        // Enter / Ctrl+C：空闲=发送，运行中=中断，长按=插队 steer
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 5),
+                          child: TuiKey(
+                            keyLabel: _pageAgentStatus == 'running' ? 'Ctrl+C' : 'Enter',
+                            label: _pageAgentStatus == 'running'
+                                ? L10n.t('中断', 'stop')
+                                : L10n.t('发送', 'send'),
+                            icon: _pageAgentStatus == 'running' ? Icons.stop : Icons.arrow_upward,
+                            color: _pageAgentStatus == 'running' ? DshColors.danger(context) : brand,
+                            active: true,
+                            onTap: _sending ? null : (_pageAgentStatus == 'running' ? _stop : _send),
+                            onLongPress: _sending ? null : () => _send(null, 'steer'),
+                          ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    // 第二层：⊕命令入口 + 模型/权限胶囊（省略显示）+ 排队发送 + 上下文圆环 + 发送
-                    Row(
-                      children: [
-                        // v2.8.0：命令入口——浅灰圆 +（对齐 PC 端 command）
-                        // v3.0.0 图像链路：⊕ = 更多（拍照 / 从相册选择 / 命令）
-                        InkWell(
-                          onTap: _showComposerMenu,
-                          borderRadius: BorderRadius.circular(16),
-                          child: Container(
-                            width: 28,
-                            height: 28,
-                            decoration: BoxDecoration(
-                              color: DshColors.line(context),
-                              shape: BoxShape.circle,
-                            ),
-                            // v2.8.0 review(P2-3)：图标用 ink3 主题自适应（深色下不再黑压黑）
-                            child: Icon(Icons.add, size: 17, color: DshColors.ink3(context)),
-                          ),
+                    const SizedBox(height: 6),
+                    // 键位条：TUI 快捷键的手机触控等价物（横滑）
+                    TuiKeyBar(
+                      padding: EdgeInsets.zero,
+                      keys: [
+                        TuiKey(keyLabel: '+', label: L10n.t('更多', 'more'), onTap: _showComposerMenu),
+                        TuiKey(keyLabel: '/', label: L10n.t('命令', 'cmd'), onTap: _showCommandMenu),
+                        TuiKey(
+                          keyLabel: 'Shift+Tab',
+                          label: _tuiPermShort(store.sessionConfig.permissionPreset),
+                          color: DshColors.warn(context),
+                          onTap: _cyclePermission,
+                          onLongPress: () => showPermSheet(context, store),
                         ),
-                        const SizedBox(width: 8),
-                        // 左侧弹性组：⊕ + 模型/权限（可收缩省略）+ 排队（固定）——
-                        // 整体包 Expanded，剩余空间在组内消化；右侧圆环/发送在组外固定，永不挤出
-                        Expanded(
-                          child: Row(
-                            children: [
-                              // 模型胶囊：名称省略；Flexible 空间不足时收缩（省略号），充足时自然宽
-                              Flexible(
-                                child: _Pill(
-                                  label: _shortModel(store.sessionConfig.model),
-                                  onTap: () => showModelSheet(context, store),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              // 权限胶囊：同上
-                              Flexible(
-                                child: _Pill(
-                                  label: _shortPerm(_permName(store.sessionConfig.permissionPreset)),
-                                  onTap: () => showPermSheet(context, store),
-                                ),
-                              ),
-                              // 运行中且输入非空 → 「排队发送」胶囊（点击=普通发送，运行中自动排队）；
-                              // 固定宽度（不参与收缩，始终完整显示）
-                              if (_pageAgentStatus == 'running' && _inputCtrl.text.trim().isNotEmpty) ...[
-                                const SizedBox(width: 6),
-                                _Pill(
-                                  label: L10n.t('排队发送', 'Queue send'),
-                                  onTap: () => _send(),
-                                ),
-                              ],
-                            ],
-                          ),
+                        TuiKey(
+                          keyLabel: 'model',
+                          label: _tuiModelShort(store.sessionConfig.model),
+                          color: DshColors.indigo(context),
+                          onTap: () => showModelSheet(context, store),
                         ),
-                        const SizedBox(width: 8),
-                        // 上下文窗口占用圆环（对齐 PC 端；数据齐全时才显示）——组外固定
-                        if (_contextRatio != null) ...[
-                          _ContextRing(ratio: _contextRatio!),
-                          const SizedBox(width: 8),
-                        ],
-                        // v2.7.2：发送按钮恢复原设计——运行中=停止（对齐 PC 端），空闲=发送；
-                        // 长按=插队发送；运行中普通发送走「排队发送」胶囊——组外固定
-                        GestureDetector(
-                          onTap: _sending
-                              ? null
-                              : (_pageAgentStatus == 'running' ? _stop : _send),
-                          onLongPress: _sending
-                              ? null
-                              : () => _send(null, 'steer'),
-                          child: Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(color: brand, borderRadius: BorderRadius.circular(9)),
-                            child: _pageAgentStatus == 'running'
-                                ? Center(
-                                    child: Container(
-                                      width: 10,
-                                      height: 10,
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(context).colorScheme.onPrimary,
-                                        borderRadius: BorderRadius.circular(2),
-                                      ),
-                                    ),
-                                  )
-                                : _sending
-                                    ? SizedBox(
-                                        width: 15,
-                                        height: 15,
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).colorScheme.onPrimary),
-                                      )
-                                    : Icon(Icons.arrow_upward, size: 17, color: Theme.of(context).colorScheme.onPrimary),
-                          ),
-                        ),
+                        TuiKey(keyLabel: 'Ctrl+O', label: L10n.t('工具', 'tools'), onTap: _openToolsFromKey),
+                        if (_pageAgentStatus == 'running' && _inputCtrl.text.trim().isNotEmpty)
+                          TuiKey(label: L10n.t('排队', 'queue'), icon: Icons.queue, onTap: () => _send()),
                       ],
                     ),
                   ],
@@ -2468,26 +2433,84 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  String _fmtUsage(Map<String, dynamic> u) {
-    final input = (u['inputTokens'] as num?)?.toInt() ?? 0;
-    final read = (u['cacheReadTokens'] as num?)?.toInt() ?? 0;
-    final write = (u['cacheWriteTokens'] as num?)?.toInt() ?? 0;
-    final out = (u['outputTokens'] as num?)?.toInt() ?? 0;
-    final billed = input + read + write;
-    final hit = billed > 0 ? ((read / billed) * 100).round() : 0;
-    return '${L10n.t('本会话：输入 ', 'This session: in ')}${fmtTokens(input)}${L10n.t(' · 缓存 ', ' · cache ')}${fmtTokens(read)}${L10n.t(' · 输出 ', ' · out ')}${fmtTokens(out)}${L10n.t(' · 命中率 ', ' · hit rate ')}$hit%';
+  /// TUI 状态栏用的极短模型名（终端状态栏一行要塞下 会话 · 模型 · 预设 · 运行态）。
+  String _tuiModelShort(String? model) {
+    if (model == null || model.isEmpty) return L10n.t('无模型', 'no model');
+    var tail = model.contains('/') ? model.split('/').last : model;
+    if (tail.startsWith('deepseek-')) tail = tail.substring('deepseek-'.length);
+    return tail.length > 10 ? '${tail.substring(0, 9)}…' : tail;
   }
 
-  String _permName(String? id) => permNameOf(id) ?? L10n.t('权限', 'Permission');
+  /// TUI 状态栏用的极短权限名（对齐 dsh-tui 的 read-only / workspace-write 简写）。
+  String _tuiPermShort(String? id) => switch (id) {
+        'read-only' => 'ro',
+        'workspace-write' => 'rw',
+        'danger-full-access' => 'full',
+        'custom' => 'custom',
+        _ => (id == null || id.isEmpty) ? '—' : (id.length > 8 ? '${id.substring(0, 7)}…' : id),
+      };
 
-  /// v2.8.0：模型名省略显示（胶囊空间有限，截断到 ~10 字符 + …）。
-  String _shortModel(String? model) {
-    final m = model ?? L10n.t('选择模型', 'Select model');
-    return m.length > 10 ? '${m.substring(0, 9)}…' : m;
+  /// TUI 状态栏左端：会话短码（dsh-tui 状态栏的 session id 位）。
+  String _tuiSessionCode() {
+    final sid = _mySessionId ?? '';
+    if (sid.isEmpty) return L10n.t('未连接', 'no session');
+    return sid.length > 6 ? sid.substring(0, 6) : sid;
   }
 
-  /// v2.8.0：权限名省略显示（"Danger Full Access" → "Danger Full…"）。
-  String _shortPerm(String perm) => perm.length > 14 ? '${perm.substring(0, 13)}…' : perm;
+  /// TUI 统计行：把已有的会话级数据排成终端一行（无数据的分段自动省略）。
+  List<String> _tuiStatsParts() {
+    final parts = <String>[];
+    final u = _usage;
+    if (_usageLoaded && u.isNotEmpty) {
+      final input = (u['inputTokens'] as num?)?.toInt() ?? 0;
+      final read = (u['cacheReadTokens'] as num?)?.toInt() ?? 0;
+      final out = (u['outputTokens'] as num?)?.toInt() ?? 0;
+      final billed = input + read;
+      final hit = billed > 0 ? ((read / billed) * 100).round() : 0;
+      parts.add('in ${fmtTokens(input)}');
+      parts.add('cache ${fmtTokens(read)} $hit%');
+      parts.add('out ${fmtTokens(out)}');
+    }
+    if (_contextRatio != null) parts.add('ctx ${(_contextRatio! * 100).round()}%');
+    parts.add('msg ${_items.length}');
+    if (_activeTools.isNotEmpty) parts.add('tool ${_activeTools.length}');
+    if (_reasoning.isNotEmpty) parts.add('think ${_reasoning.length}');
+    if (_pageAgentStatus == 'running') parts.add(_streaming ? 'stream' : 'busy');
+    return parts;
+  }
+
+  /// 提示符框顶边标题：会话标题（运行中显示引导态）。
+  String _tuiComposerTitle() {
+    if (_pageAgentStatus == 'running') return L10n.t('运行中 · 输入即引导', 'running · input steers');
+    final t = _title;
+    return (t == null || t.isEmpty) ? L10n.t('输入', 'prompt') : t;
+  }
+
+  /// TUI 键位 `Shift+Tab`：循环权限预设。
+  /// 危险档位（danger-full-access）不进循环，改由长按打开完整面板做风险确认。
+  Future<void> _cyclePermission() async {
+    final cat = widget.store.catalog;
+    if (cat == null) return;
+    final list = cat.permissionPresets.where((p) => p.id != 'danger-full-access').toList();
+    if (list.isEmpty) return;
+    final cur = widget.store.sessionConfig.permissionPreset;
+    final idx = list.indexWhere((p) => p.id == cur);
+    final next = list[(idx + 1) % list.length];
+    final msgr = ScaffoldMessenger.of(context);
+    try {
+      await widget.store.applySessionConfig({'permissionPreset': next.id});
+      showToastAt(msgr, '${L10n.t('权限：', 'Permission: ')}${next.name}');
+      if (mounted) setState(() {});
+    } catch (e) {
+      showToastAt(msgr, '${L10n.t('切换失败：', 'Switch failed: ')}$e');
+    }
+  }
+
+  /// TUI 键位 `Ctrl+O`：工具卡（任务 / 子代理 / 目标）。
+  void _openToolsFromKey() {
+    final sid = _mySessionId;
+    if (sid != null) showSessionToolsSheet(context, widget.store, sid, onTitleChanged: widget.onTitleChanged);
+  }
 
   /// v2.8.0：斜杠命令菜单（对齐 PC 端 command menu）——列出命令，点选填入输入框。
   /// v3.0.0 图像链路：⊕ = 更多菜单（拍照 / 从相册选择 / 命令）。
@@ -3062,28 +3085,38 @@ class _ChatScreenState extends State<ChatScreen> {
         // v3.0.0(热修 07)：不再剥离 [图片]——占位改由服务端 user 摘要直接去除
         // （blocksToText imagePlaceholder:false），客户端保留用户原文，不误删手打内容。
         final text = item.text;
-        Widget userBubble(Widget child) => Align(
-              alignment: Alignment.centerRight,
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
-                decoration: BoxDecoration(
-                  color: DshColors.bubble(context),
-                  borderRadius: BorderRadius.circular(22),
-                ),
-                child: child,
+        // TUI 化：用户输入不再用右侧气泡，改成 `>` 提示符行——dsh-tui 的 transcript
+        // 里用户输入就是「提示符 + 原文」，青色提示符即"这行是你说的话"。
+        Widget userLine(Widget child) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Text(
+                      kTuiPrompt,
+                      style: TextStyle(
+                        fontFamily: DshTheme.mono,
+                        fontSize: 13,
+                        height: 1.5,
+                        fontWeight: FontWeight.w700,
+                        color: DshColors.cyan(context),
+                      ),
+                    ),
+                  ),
+                  Expanded(child: child),
+                ],
               ),
             );
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (images.isNotEmpty)
-              userBubble(_ImagesGrid(images: images, sessionId: _mySessionId ?? '')),
-             if (item.files.isNotEmpty)
-               userBubble(_FileResults(files: item.files)),
+              userLine(_ImagesGrid(images: images, sessionId: _mySessionId ?? '')),
+            if (item.files.isNotEmpty) userLine(_FileResults(files: item.files)),
             if (text.isNotEmpty)
-              userBubble(Text(text, style: const TextStyle(fontSize: 14, height: 1.57))),
+              userLine(Text(text, style: const TextStyle(fontSize: 13.5, height: 1.5, fontWeight: FontWeight.w500))),
             // v3.1.5（issue #15）：用户消息此前没有任何复制入口（只有助手消息有操作栏）——
             // 这里右对齐补一个「复制」，复用 _runMessageAction('copy')：复制正文 + 「已复制」提示，
             // 与助手消息行为一致。整段选择另由 SelectionArea 承担（长按选词）。
@@ -3691,31 +3724,66 @@ class _ToolActivityCardState extends State<_ToolActivityCard> {
         rawData['toolSchema'] ??
         rawData['schema'] ??
         rawData['inputSchema'];
-    final accent = item.toolError ? Colors.redAccent : DshColors.brand(context);
+    final accent = item.toolError ? DshColors.danger(context) : DshColors.brand(context);
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
         color: DshColors.surface(context),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: item.toolError ? Colors.redAccent.withValues(alpha: .5) : DshColors.line(context)),
+        borderRadius: BorderRadius.circular(DshTheme.radiusSm),
+        border: Border.all(color: item.toolError ? DshColors.danger(context) : DshColors.line(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // TUI 化：折叠的工具调用 = `✓ 工具名 · 状态` 单行（dsh-tui 的 collapsed tool call）
           InkWell(
             onTap: () => _setExpanded(!expanded),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               child: Row(
                 children: [
-                  Icon(item.toolError ? Icons.error_outline : Icons.build_outlined, size: 16, color: accent),
-                  const SizedBox(width: 7),
+                  if (item.toolError)
+                    Text('✗',
+                        style: TextStyle(
+                            fontFamily: DshTheme.mono,
+                            fontSize: 12,
+                            height: 1.3,
+                            fontWeight: FontWeight.w700,
+                            color: accent))
+                  else if (item.toolStatus == 'success')
+                    Text('✓',
+                        style: TextStyle(
+                            fontFamily: DshTheme.mono,
+                            fontSize: 12,
+                            height: 1.3,
+                            fontWeight: FontWeight.w700,
+                            color: DshColors.ok(context)))
+                  else
+                    TuiSpinner(size: 12, color: DshColors.cyan(context)),
+                  const SizedBox(width: 6),
                   Expanded(
-                    child: Text(item.toolName ?? L10n.t('工具', 'Tool'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      item.toolName ?? L10n.t('工具', 'Tool'),
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.3,
+                        fontFamily: DshTheme.mono,
+                        fontWeight: FontWeight.w600,
+                        color: DshColors.ink(context),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  Text(_status(), style: TextStyle(fontSize: 11, color: item.toolError ? Colors.redAccent : DshColors.ink3(context))),
+                  Text(
+                    _status(),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: DshTheme.mono,
+                      color: item.toolError ? DshColors.danger(context) : DshColors.muted(context),
+                    ),
+                  ),
                   const SizedBox(width: 4),
-                  Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 18, color: DshColors.ink3(context)),
+                  Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 16, color: DshColors.ink3(context)),
                 ],
               ),
             ),
@@ -4098,16 +4166,31 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // TUI 化：agent 行 = 紫色标记 + 单行细线（dsh-tui 的 section header 语法）
             Row(
               children: [
-                Text('✦ Agent',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: DshColors.ink2(context))),
-                const SizedBox(width: 7),
-                if (widget.streaming)
-                  const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5)),
+                Text('✦',
+                    style: TextStyle(
+                        fontFamily: DshTheme.mono, fontSize: 12, height: 1.2, color: DshColors.violet(context))),
+                const SizedBox(width: 4),
+                Text('agent',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      height: 1.2,
+                      fontFamily: DshTheme.mono,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.4,
+                      color: DshColors.violet(context),
+                    )),
+                if (widget.streaming) ...[
+                  const SizedBox(width: 6),
+                  TuiSpinner(size: 12, color: DshColors.cyan(context)),
+                ],
+                const SizedBox(width: 8),
+                Expanded(child: Container(height: 1, color: DshColors.line(context))),
               ],
             ),
-            const SizedBox(height: 3),
+            const SizedBox(height: 4),
             if (hasReasoning) _buildReasoningChain(context),
             // v3.2.3：不再用 _blocks!（空断言会让整条消息消失），空则什么都不渲染
             ...(_blocks ?? const <Widget>[]),
@@ -4135,41 +4218,39 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
   Widget _buildReasoningChain(BuildContext context) {
     final expanded = widget.expandedOverride ?? widget.defaultExpanded;
     final reasoning = widget.reasoning ?? '';
-    final ink2 = DshColors.ink2(context);
     final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final brand = DshColors.brand(context);
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
-        color: DshColors.brandSoft(context),
-        border: Border.all(color: line),
-        borderRadius: BorderRadius.circular(10),
-      ),
+    final violet = DshColors.violet(context);
+    // TUI 化：圆角胶囊 → 终端式单行（紫色标记 + 细线），展开内容改用左侧竖线归属
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           InkWell(
             onTap: () => widget.onOverride?.call(!expanded),
-            borderRadius: BorderRadius.circular(10),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: [
-                  Icon(Icons.psychology_outlined, size: 15, color: brand),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      L10n.t('思维链 ${reasoning.length} 字', 'Thinking chain · ${reasoning.length} chars'),
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ink2),
-                      overflow: TextOverflow.ellipsis,
+                  Text('✦', style: TextStyle(fontFamily: DshTheme.mono, fontSize: 12, height: 1.2, color: violet)),
+                  const SizedBox(width: 4),
+                  Text(
+                    L10n.t('think · ${reasoning.length} 字', 'think · ${reasoning.length} chars'),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      height: 1.2,
+                      fontFamily: DshTheme.mono,
+                      fontWeight: FontWeight.w600,
+                      color: violet,
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  Expanded(child: Container(height: 1, color: DshColors.line(context))),
+                  const SizedBox(width: 6),
                   Icon(
                     expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                    size: 16,
+                    size: 15,
                     color: ink3,
                   ),
                 ],
@@ -4177,11 +4258,21 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
             ),
           ),
           if (expanded)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+            Container(
+              margin: const EdgeInsets.only(top: 4, left: 1),
+              padding: const EdgeInsets.only(left: 8),
+              decoration: BoxDecoration(
+                border: Border(left: BorderSide(color: violet.withValues(alpha: 0.5), width: 2)),
+              ),
               child: SelectableText(
                 reasoning,
-                style: TextStyle(fontSize: 12, height: 1.6, color: ink3, fontStyle: FontStyle.italic),
+                style: TextStyle(
+                  fontSize: 11.5,
+                  height: 1.55,
+                  fontFamily: DshTheme.mono,
+                  color: ink3,
+                  fontStyle: FontStyle.italic,
+                ),
               ),
             ),
         ],
@@ -4586,11 +4677,7 @@ class _ActivityBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ink2 = DshColors.ink2(context);
     final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final surface = DshColors.surface(context);
-    final brand = DshColors.brand(context);
     final toolLabel = tools.isEmpty
         ? ''
         : (tools.length > 1
@@ -4605,15 +4692,11 @@ class _ActivityBar extends StatelessWidget {
         : (thinking
             ? L10n.t('思考中…（${reasoning.length} 字）', 'Thinking… (${reasoning.length} chars)')
             : L10n.t('已思考 ${reasoning.length} 字', 'Thought: ${reasoning.length} chars'));
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(12, 2, 12, 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: surface,
-        border: Border.all(color: line),
-        borderRadius: BorderRadius.circular(12),
-      ),
+    // TUI 化：活动条不再是边框卡片，改成终端两行——
+    // 思考 = 紫色 ✦ thinking 单行（流式带 spinner），工具 = spinner + 工具名单行
+    // （对齐 dsh-tui 的 collapsed tool call：结果落定即收成一行）。
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4621,22 +4704,31 @@ class _ActivityBar extends StatelessWidget {
           if (reasoning.isNotEmpty)
             InkWell(
               onTap: showContent ? onToggleReasoning : null,
-              borderRadius: BorderRadius.circular(8),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
+                padding: const EdgeInsets.symmetric(vertical: 1),
                 child: Row(
                   children: [
-                    Icon(Icons.psychology_outlined, size: 16, color: brand),
-                    const SizedBox(width: 6),
+                    Text('✦',
+                        style: TextStyle(
+                            fontFamily: DshTheme.mono, fontSize: 12, height: 1.2, color: DshColors.violet(context))),
+                    const SizedBox(width: 4),
+                    if (thinking) ...[
+                      TuiSpinner(size: 11, color: DshColors.violet(context)),
+                      const SizedBox(width: 4),
+                    ],
                     Expanded(
                       child: Text(
                         header,
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: ink2),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          height: 1.3,
+                          fontFamily: DshTheme.mono,
+                          color: DshColors.violet(context),
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (showContent)
-                      Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 16, color: ink3),
+                    if (showContent) Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 14, color: ink3),
                   ],
                 ),
               ),
@@ -4647,19 +4739,34 @@ class _ActivityBar extends StatelessWidget {
               child: SingleChildScrollView(
                 child: SelectableText(
                   reasoning,
-                  style: TextStyle(fontSize: 12, height: 1.55, color: ink3, fontStyle: FontStyle.italic),
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.5,
+                    fontFamily: DshTheme.mono,
+                    fontStyle: FontStyle.italic,
+                    color: ink3,
+                  ),
                 ),
               ),
             ),
           if (tools.isNotEmpty)
             Padding(
-              padding: EdgeInsets.only(top: reasoning.isNotEmpty ? 4 : 0),
+              padding: EdgeInsets.only(top: reasoning.isNotEmpty ? 2 : 0),
               child: Row(
                 children: [
-                  Icon(Icons.handyman_outlined, size: 15, color: ink2),
-                  const SizedBox(width: 6),
+                  TuiSpinner(size: 11, color: DshColors.cyan(context)),
+                  const SizedBox(width: 5),
                   Expanded(
-                    child: Text(toolLabel, style: TextStyle(fontSize: 12.5, color: ink2), overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      toolLabel,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        height: 1.3,
+                        fontFamily: DshTheme.mono,
+                        color: DshColors.cyan(context),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
               ),
@@ -4781,24 +4888,6 @@ class _JobCardState extends State<_JobCard> {
   }
 }
 
-class _StatusDot extends StatelessWidget {
-  final String status;
-  const _StatusDot({required this.status});
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (status) {
-      'running' => DshColors.ok(context),
-      'waiting' => DshColors.warn(context),
-      _ => DshColors.ink3(context),
-    };
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-}
-
 /// live 列表视觉顶部的"查看更早"入口。
 class _OlderButton extends StatelessWidget {
   final bool busy;
@@ -4835,88 +4924,28 @@ class _JumpToLatestButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark ? Colors.white.withValues(alpha: 0.10) : Colors.white.withValues(alpha: 0.88);
+    // TUI 化：圆钮 + 阴影 → 方框小键（终端只用前景色 + 1px 边框分层）
     return AnimatedOpacity(
       opacity: visible ? 1 : 0,
       duration: const Duration(milliseconds: 160),
       child: IgnorePointer(
         ignoring: !visible,
         child: Material(
-          color: bg,
-          shape: CircleBorder(side: BorderSide(color: DshColors.line(context), width: 0.8)),
-          elevation: 2,
-          shadowColor: Colors.black26,
+          color: DshColors.surface(context),
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: DshColors.line(context), width: 1),
+            borderRadius: BorderRadius.circular(DshTheme.radiusSm),
+          ),
+          elevation: 0,
           child: InkWell(
-            customBorder: const CircleBorder(),
             onTap: onTap,
+            borderRadius: BorderRadius.circular(DshTheme.radiusSm),
             child: SizedBox(
-              width: 38,
-              height: 38,
-              child: Icon(Icons.keyboard_arrow_down, size: 24, color: DshColors.ink2(context)),
+              width: 34,
+              height: 30,
+              child: Icon(Icons.keyboard_arrow_down, size: 20, color: DshColors.cyan(context)),
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 上下文窗口占用圆环（对齐 PC 端）：绿色 <70%，橙色 <90%，红色 ≥90%。
-class _ContextRing extends StatelessWidget {
-  final double ratio;
-  const _ContextRing({required this.ratio});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = ratio < 0.7
-        ? DshColors.ok(context)
-        : ratio < 0.9
-            ? DshColors.warn(context)
-            : DshColors.danger(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(
-            value: ratio,
-            strokeWidth: 2,
-            backgroundColor: DshColors.line(context),
-            color: color,
-          ),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          '${(ratio * 100).round()}%',
-          style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600),
-        ),
-      ],
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _Pill({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final ink2 = DshColors.ink2(context);
-    final line = DshColors.line(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-        decoration: BoxDecoration(color: line, borderRadius: BorderRadius.circular(999)),
-        // v2.8.0 review(P1-2)：单行 + 省略号，避免长模型名撑爆胶囊行（旧 ListView 可滚、Row 不可）
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: ink2),
         ),
       ),
     );
@@ -4940,11 +4969,11 @@ class _ActionChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: surface,
           border: Border.all(color: line),
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(DshTheme.radiusSm),
         ),
         child: Text(
           action['title'] as String? ?? '',
-          style: TextStyle(fontSize: 12.5, color: ink),
+          style: TextStyle(fontSize: 12, fontFamily: DshTheme.mono, color: ink),
         ),
       ),
     );
