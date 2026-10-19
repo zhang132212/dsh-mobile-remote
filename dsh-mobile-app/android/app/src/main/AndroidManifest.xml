@@ -120,6 +120,13 @@
                 <data android:mimeType="*/*"/>
             </intent-filter>
         </activity>
+        <!-- v3.2.13：HTML 交互模式（原生 WebView，可点按钮 / 跑 JS）。
+             只由本 App 内部拉起（exported=false），不暴露给外部。 -->
+        <activity
+            android:name=".HtmlViewerActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|density|uiMode" />
         <!-- 悬浮球常驻服务（v2.7） -->
         <service
             android:name=".FloatingBubbleService"

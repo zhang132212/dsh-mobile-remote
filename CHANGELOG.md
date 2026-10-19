@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.2.13（2026-10-20）— HTML「交互模式」：页面里 JS 设计的按钮真的能点
+
+> 版本：App `3.2.13+36` / 插件 `3.1.5-eun.1`。
+> 验收门槛：`flutter analyze`（0 issue）。`flutter test` 全绿。
+
+- 阅读页（HTML）工具栏新增「交互模式（可点按钮）」按钮：把页面交给 **Android 系统 WebView**（原生 Activity 承载，不引第三方 WebView 包、不跳外部浏览器），真浏览器引擎执行 —— 按钮 / 脚本 / 表单 / JS 弹窗全部可用。
+- **电脑工作区里的本地 HTML**：正文 + 所在目录一起交给原生侧；页面里相对路径的 JS / CSS / 图片由 `shouldInterceptRequest` 经电脑端 `/m/api/files` 拉取（路径限定在文档目录内，阻止 `../` 越界）—— 依赖脚本的按钮也能正常工作。
+- **http(s) 网页**：直接交给 WebView 加载，完整网页能力（登录、表单、动态交互照常）。
+- **安全边界**：不开 `addJavascriptInterface`、不开 `file://` 访问、Activity `exported=false` 不暴露外部入口；`alert/confirm/prompt` 由宿主对话框接管。
+- 静态阅读模式完全保留（默认仍是排版阅读，交互模式按需点一下进入）；「查看源码 / 复制 / 另存」等能力不受影响。
+- 回归：新增 `test/html_interactive_test.dart`（参数构造 3 例）。
 ## v3.2.12（2026-10-20）— HTML 文档里的链接真的能点了
 
 > 版本：App `3.2.12+35` / 插件 `3.1.5-eun.1`。

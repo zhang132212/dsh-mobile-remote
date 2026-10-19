@@ -10,6 +10,8 @@
 // v3.3.0（官方风格）：页面底 c.docPreview，正文套一张 DshCard「纸张」（layer1 + 发丝边 +
 // R20）；标题栏换 DshAppBar，动作按钮换 DshIconButton，加载/错误/告警分别用
 // DshLoading / DshError / DshBanner，目录弹层用 DshSheet + DshTile。
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -17,6 +19,7 @@ import 'package:path/path.dart' as p;
 
 import '../api.dart';
 import '../docs/docx_writer.dart';
+import '../docs/html_interactive.dart';
 import '../docs/loader.dart';
 import '../docs/model.dart';
 import '../docs/render.dart';
@@ -284,6 +287,36 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
     }
   }
 
+  /// HTML「交互模式」：交给原生 WebView 跑真浏览器引擎——页面里 JS 设计的按钮真的能点。
+  ///
+  /// 网络文档直接把 URL 交给 WebView；电脑工作区的本地 HTML 则把正文 + 所在目录
+  /// 一起交给原生侧，由它按目录把相对路径的 JS / CSS / 图片从电脑拉下来。
+  Future<void> _openInteractive() async {
+    final doc = _doc;
+    if (doc == null || doc.format != DocFormat.html) return;
+    final raw = _raw;
+    final remoteUrl = widget.httpUrl;
+    if (remoteUrl == null && (raw == null || raw.isEmpty)) {
+      showToast(context, L10n.t('没有可用的 HTML 内容', 'No HTML content'));
+      return;
+    }
+    try {
+      final ok = await openInteractiveHtml(
+        url: remoteUrl,
+        html: remoteUrl == null ? utf8.decode(raw!, allowMalformed: true) : null,
+        title: doc.title,
+        baseDir: widget.remotePath == null ? null : p.windows.dirname(widget.remotePath!),
+      );
+      if (!ok && mounted) {
+        showToast(context, L10n.t('交互模式启动失败', 'Failed to open interactive mode'));
+      }
+    } catch (e) {
+      if (mounted) {
+        showToast(context, L10n.t('交互模式启动失败：$e', 'Interactive mode failed: $e'));
+      }
+    }
+  }
+
   /// 把原始文件另存到系统下载目录。
   Future<void> _saveOriginal() async {
     final raw = _raw;
@@ -411,6 +444,15 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
 
   /// 全屏页与抽屉共用的操作按钮。
   List<Widget> _actions(Document? doc) => [
+        // HTML：一键进入「交互模式」——跑真 WebView，页面里的按钮/脚本可用
+        if (doc != null && doc.format == DocFormat.html)
+          Center(
+            child: DshIconButton(
+              icon: Icons.touch_app_outlined,
+              tooltip: L10n.t('交互模式（可点按钮）', 'Interactive mode (buttons work)'),
+              onTap: _openInteractive,
+            ),
+          ),
         if (_hasOutlineEntry(doc))
           Center(
             child: DshIconButton(

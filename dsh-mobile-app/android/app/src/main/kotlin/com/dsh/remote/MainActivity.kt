@@ -88,6 +88,29 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // v3.2.13：HTML 交互模式——交给原生 WebView（页面里的按钮/JS 真的能用）。
+        // 不引第三方 WebView 包：系统 WebView 由独立 Activity 承载，Dart 侧只发一次意图。
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dsh/webview")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "openHtml" -> {
+                        try {
+                            val intent = Intent(this, HtmlViewerActivity::class.java)
+                            call.argument<String>("url")?.let { intent.putExtra("url", it) }
+                            call.argument<String>("html")?.let { intent.putExtra("html", it) }
+                            call.argument<String>("title")?.let { intent.putExtra("title", it) }
+                            call.argument<String>("baseDir")?.let { intent.putExtra("baseDir", it) }
+                            call.argument<String>("apiBase")?.let { intent.putExtra("apiBase", it) }
+                            call.argument<String>("token")?.let { intent.putExtra("token", it) }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("open-html-failed", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         // 引擎就绪：投递冷启动暂存的面板动作
         deliverPendingAction()
         // v2.7.2 review：Dart 侧 handler 注册可能晚于本回调——延迟再投一次 + consume 兜底
