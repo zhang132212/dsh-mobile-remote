@@ -520,6 +520,41 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         ),
       ];
 
+  /// HTML 文档的「交互模式」入口条：点一下用原生 WebView 跑真浏览器引擎。
+  Widget _interactiveBanner(BuildContext context) {
+    final c = DshPalette.of(context);
+    return Material(
+      color: c.brandSoft,
+      borderRadius: DshRadius.rMd,
+      child: InkWell(
+        borderRadius: DshRadius.rMd,
+        onTap: _openInteractive,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DshSpace.md,
+            vertical: DshSpace.sm,
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.touch_app_outlined, size: 18, color: c.ink2),
+              const SizedBox(width: DshSpace.sm),
+              Expanded(
+                child: Text(
+                  L10n.t(
+                    '这是静态阅读模式。想点页面里的按钮？进入交互模式 →',
+                    'Static reading view. To tap the page buttons, open interactive mode →',
+                  ),
+                  style: DshType.mdSmall.copyWith(color: c.ink2),
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: c.ink3),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _body() {
     final c = DshPalette.of(context);
     if (_loading) return const DshLoading();
@@ -610,6 +645,12 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
                   tone: DshBannerTone.warn,
                   icon: Icons.warning_amber_rounded,
                 ),
+                const SizedBox(height: DshSpace.md),
+              ],
+              // HTML：静态排版只负责「读」；页面里 JS 设计的按钮要真浏览器引擎才能点。
+              // 入口条做显眼一点，避免用户以为「按钮点不了 = 坏了」。
+              if (doc.format == DocFormat.html) ...[
+                _interactiveBanner(context),
                 const SizedBox(height: DshSpace.md),
               ],
               DocBlocks(doc.blocks, ctx: ctx, headingKeys: _headingKeys),
