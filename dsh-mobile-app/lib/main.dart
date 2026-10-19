@@ -9,6 +9,7 @@ import 'l10n.dart';
 import 'api.dart';
 import 'store.dart';
 import 'floating.dart';
+import 'dsh_kit.dart';
 import 'theme.dart';
 import 'logger.dart';
 import 'scan_screen.dart';
@@ -44,18 +45,7 @@ void main() async {
   // 全局错误边界：build/布局异常不再白屏或静默闪退，直接显示错误文本（调试用）
   ErrorWidget.builder = (details) {
     AppLog.instance.log('build 异常: ${details.exceptionAsString()}');
-    return Material(
-      color: const Color(0xFF0E1116),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: SelectableText(
-            '${L10n.t('界面异常：', 'UI error:')}\n${details.exceptionAsString()}',
-            style: const TextStyle(color: Color(0xFFE6E8EC), fontSize: 13),
-          ),
-        ),
-      ),
-    );
+    return _ErrorFallback(details.exceptionAsString());
   };
   await api.load();
   await store.loadPrefs();
@@ -315,12 +305,14 @@ class _DshAppState extends State<DshApp> {
       themeMode: mode,
       home: const RootScreen(),
       // 全局横幅：渲染在 Navigator（所有 route）之上
-      builder: (context, child) {
+      builder: (bannerContext, child) {
         final bannerCount = _bannerCount;
         if (bannerCount != null) {
           AppLog.instance.log('Banner: builder 渲染中 count=$bannerCount');
         }
         if (bannerCount == null) return child!;
+        // 注意：这里必须用 builder 的 context（MaterialApp 之下）取主题
+        final c = DshPalette.of(bannerContext);
         return Stack(
           children: [
             child!,
@@ -330,7 +322,12 @@ class _DshAppState extends State<DshApp> {
               right: 0,
               child: SafeArea(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  padding: const EdgeInsets.fromLTRB(
+                    DshSpace.md,
+                    DshSpace.sm,
+                    DshSpace.md,
+                    0,
+                  ),
                   // v2.8.0：左右滑动关闭横幅（Dismissible，横向双向）；滑掉即消失+清未读基线
                   child: Dismissible(
                     key: const ValueKey('notif-banner'),
@@ -356,30 +353,29 @@ class _DshAppState extends State<DshApp> {
                           // Phase 2(A8)：与抽屉/悬浮球入口共用通知页打开逻辑
                           openNotificationsScreen();
                         },
+                        // 官方 toast：深底 + onToast 文字 + R12 + 发丝边 + 浮层阴影
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: DshSpace.md,
+                            vertical: 10,
+                          ),
                           decoration: BoxDecoration(
-                            // 跟随主题：浅色=白底深字，深色=深底浅字
-                            color: Theme.of(context).brightness == Brightness.dark ? DshTheme.surfaceDark : Colors.white,
-                            borderRadius: BorderRadius.circular(DshTheme.radiusMd),
-                            boxShadow: const [
-                              BoxShadow(color: Color(0x33000000), blurRadius: 12, offset: Offset(0, 4)),
-                            ],
-                            border: Theme.of(context).brightness == Brightness.dark
-                                ? null
-                                : Border.all(color: DshColors.line(context)),
+                            color: c.toast,
+                            borderRadius: DshRadius.rMd,
+                            boxShadow: DshShadow.prominent,
+                            border: Border.fromBorderSide(DshStroke.side(c.line3)),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.notifications_active, size: 17, color: DshColors.brand(context)),
-                              const SizedBox(width: 8),
+                              Icon(Icons.notifications_active, size: 16, color: c.onToast),
+                              const SizedBox(width: DshSpace.sm),
                               Expanded(
                                 child: Text(
                                   L10n.t('有 $bannerCount 条新通知', '$bannerCount new notification${bannerCount > 1 ? 's' : ''}'),
-                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: DshColors.ink(context)),
+                                  style: DshType.xs13.copyWith(color: c.onToast),
                                 ),
                               ),
-                              Icon(Icons.chevron_right, size: 16, color: DshColors.ink3(context)),
+                              Icon(Icons.chevron_right, size: 16, color: c.onToast),
                             ],
                           ),
                         ),
@@ -494,6 +490,7 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
       );
     }
     final titles = ['DSH', L10n.t('会话', 'Sessions'), L10n.t('设置', 'Settings')];
+    final c = DshPalette.of(context);
     // 返回键：非首页 tab 按返回 → 先回首页；首页再按返回 → 退出 App
     return PopScope(
       canPop: _index == 0,
@@ -504,109 +501,122 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
       },
       child: Scaffold(
       key: _drawerKey,
+      // 官方标题栏：52 高、无阴影、底部 0.5px 发丝线，标题 16/24·500
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.menu, size: 20),
-          onPressed: () => _drawerKey.currentState?.openDrawer(),
+        toolbarHeight: 52,
+        backgroundColor: c.bg,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leadingWidth: 52,
+        leading: DshIconButton(
+          icon: Icons.menu,
+          tooltip: L10n.t('菜单', 'Menu'),
+          onTap: () => _drawerKey.currentState?.openDrawer(),
         ),
         // 去掉默认 16px 标题间距：状态点紧贴抽屉菜单按钮右侧
         titleSpacing: 0,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 电脑在线状态点：贴靠抽屉图标；点按立即探测/重连，长按看状态文字
-            Transform.translate(
-              offset: const Offset(-6, 0), // 再向抽屉菜单靠近一点
-              child: Tooltip(
-                message: switch (store.connState) {
-                  'connected' => L10n.t('电脑在线', 'PC online'),
-                  'connecting' => L10n.t('连接中…', 'Connecting…'),
-                  _ => L10n.t('电脑离线 · 点按重连', 'PC offline · tap to reconnect'),
-                },
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: () => store.resume(),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: switch (store.connState) {
-                          'connected' => DshColors.ok(context),
-                          'connecting' => DshColors.warn(context),
-                          _ => DshColors.ink3(context),
-                        },
-                        shape: BoxShape.circle,
-                        border: Border.all(color: DshColors.line(context), width: 1),
-                      ),
-                    ),
+            // 电脑在线状态点：贴上抽屉图标；点按立即探测/重连，长按看状态文字
+            Tooltip(
+              message: switch (store.connState) {
+                'connected' => L10n.t('电脑在线', 'PC online'),
+                'connecting' => L10n.t('连接中…', 'Connecting…'),
+                _ => L10n.t('电脑离线 · 点按重连', 'PC offline · tap to reconnect'),
+              },
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => store.resume(),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: DshSpace.xs,
+                    vertical: DshSpace.sm,
+                  ),
+                  child: DshStatusDot(
+                    color: switch (store.connState) {
+                      'connected' => c.ok,
+                      'connecting' => c.warn,
+                      _ => c.ink3,
+                    },
+                    pulse: store.connState == 'connecting',
                   ),
                 ),
               ),
             ),
-            const SizedBox(width: 5),
+            const SizedBox(width: DshSpace.sm),
             Text(
               titles[_index],
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-              ),
+              style: DshType.m16.copyWith(color: c.ink),
             ),
           ],
         ),
         actions: [
-          IconButton(
-            icon: Badge(
-              isLabelVisible: store.unread > 0,
-              backgroundColor: DshColors.danger(context),
-              label: Text(
-                '${store.unread}',
-                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white),
-              ),
-              child: const Icon(Icons.notifications_none, size: 20),
-            ),
-            onPressed: () => openNotificationsScreen(onOpenSession: () {
+          DshIconButton(
+            icon: Icons.notifications_none,
+            badge: store.unread,
+            tooltip: L10n.t('通知', 'Notifications'),
+            onTap: () => openNotificationsScreen(onOpenSession: () {
               // 通知页里打开会话后回到首页 tab（原抽屉入口行为）
               if (mounted) setState(() => _index = 0);
             }),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: DshSpace.sm),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(DshStroke.hairline),
+          child: Container(height: DshStroke.hairline, color: c.line2),
+        ),
       ),
+      // 官方侧栏：sidebar 底、无投影、右侧发丝线
       drawer: Drawer(
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        backgroundColor: c.sidebar,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.zero,
+          side: DshStroke.side(c.line2),
+        ),
         child: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                padding: const EdgeInsets.fromLTRB(
+                  DshSpace.xl,
+                  DshSpace.xl,
+                  DshSpace.xl,
+                  DshSpace.md,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('DSH', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, fontFamily: 'Georgia')),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(42)),
+                    Text('DSH', style: DshType.xl24.copyWith(color: c.ink)),
+                    const SizedBox(height: DshSpace.md),
+                    DshButton(
+                      label: L10n.t('＋ 新建会话', '+ New Session'),
+                      variant: DshButtonVariant.primary,
+                      size: DshButtonSize.lg,
+                      expanded: true,
                       onPressed: () {
                         Navigator.of(context).pop();
                         _openNewSession();
                       },
-                      child: Text(L10n.t('＋ 新建会话', '+ New Session')),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: DshSpace.xs),
               // 工作区快速切换（对齐 PC 端 workspace 切换；≥2 个工作区时显示）
               // 封顶 35% 屏高 + 可滚动：工作区再多也不会把下方导航挤出屏幕
               if (store.workspaces.length >= 2) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-                  child: Text(
-                    L10n.t('工作区', 'Workspaces'),
-                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, letterSpacing: 0.5, color: DshColors.ink3(context)),
+                DshSectionHeader(
+                  L10n.t('工作区', 'Workspaces'),
+                  padding: const EdgeInsets.fromLTRB(
+                    DshSpace.md,
+                    DshSpace.sm,
+                    DshSpace.md,
+                    DshSpace.xs,
                   ),
                 ),
                 ConstrainedBox(
@@ -619,17 +629,17 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: DshSpace.sm),
               ],
               _drawerItem(Icons.home_outlined, L10n.t('首页', 'Home'), 0),
               _drawerItem(Icons.history, L10n.t('会话', 'Sessions'), 1),
               _drawerItem(Icons.settings_outlined, L10n.t('设置', 'Settings'), 2),
               const Spacer(),
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(DshSpace.lg),
                 child: Text(
                   L10n.t('本机直连 · DeepSeek Harness', 'Direct connection · DeepSeek Harness'),
-                  style: TextStyle(fontSize: 12, color: DshColors.ink3(context)),
+                  style: DshType.xxs12.copyWith(color: c.caption),
                 ),
               ),
             ],
@@ -652,87 +662,111 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// 侧栏导航项：R12 整行、选中底 navActive、图标 20px ink2、文字 14（选中加粗+ink）。
   Widget _drawerItem(IconData icon, String label, int index) {
-    final brand = DshColors.brand(context);
-    final brandSoft = DshColors.brandSoft(context);
-    final ink2 = DshColors.ink2(context);
+    final c = DshPalette.of(context);
     final selected = _index == index;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: () {
-          setState(() => _index = index);
-          Navigator.of(context).pop();
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          decoration: BoxDecoration(
-            color: selected ? brandSoft : null,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, size: 20, color: selected ? brand : ink2),
-              const SizedBox(width: 12),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 14.5,
-                  color: selected ? brand : ink2,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+      padding: const EdgeInsets.symmetric(
+        horizontal: DshSpace.sm,
+        vertical: DshSpace.xxs,
+      ),
+      child: Material(
+        color: selected ? c.navActive : Colors.transparent,
+        borderRadius: DshRadius.rMd,
+        child: InkWell(
+          borderRadius: DshRadius.rMd,
+          splashFactory: NoSplash.splashFactory,
+          highlightColor: c.hover,
+          hoverColor: c.navHover,
+          onTap: () {
+            setState(() => _index = index);
+            Navigator.of(context).pop();
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: DshSpace.md,
+              vertical: DshSpace.sm,
+            ),
+            child: Row(
+              children: [
+                Icon(icon, size: 20, color: c.ink2),
+                const SizedBox(width: DshSpace.md),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: (selected ? DshType.sStrong14 : DshType.s14)
+                        .copyWith(color: c.ink),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
-  /// 工作区切换项（null = 全部工作区）。
+
+  /// 工作区切换项（null = 全部工作区）：侧栏行的紧凑变体，副标题是工作区路径。
   Widget _workspaceItem(Map<String, dynamic>? w) {
-    final brand = DshColors.brand(context);
-    final brandSoft = DshColors.brandSoft(context);
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
+    final c = DshPalette.of(context);
     final isAll = w == null;
     final path = w?['path'] as String? ?? '';
     final title = isAll ? L10n.t('全部工作区', 'All Workspaces') : ((w['title'] as String?) ?? path);
     // v3.1.1(issue #5)：原始路径做展示，规范化后与 workspacePath（归一存储）匹配
     final selected = isAll ? store.workspacePath == null : store.workspacePath == AppStore.normPath(path);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: () {
-          store.setWorkspace(isAll ? null : path);
-          Navigator.of(context).pop();
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-          decoration: BoxDecoration(
-            color: selected ? brandSoft : null,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Row(
-            children: [
-              Icon(isAll ? Icons.folder_open_outlined : Icons.folder_outlined, size: 18, color: selected ? brand : ink2),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 13.5, color: selected ? brand : ink2,
-                            fontWeight: selected ? FontWeight.w600 : FontWeight.w400)),
-                    if (!isAll)
-                      Text(path, maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 10.5, color: ink3)),
-                  ],
+      padding: const EdgeInsets.symmetric(
+        horizontal: DshSpace.sm,
+        vertical: DshSpace.xxs,
+      ),
+      child: Material(
+        color: selected ? c.navActive : Colors.transparent,
+        borderRadius: DshRadius.rMd,
+        child: InkWell(
+          borderRadius: DshRadius.rMd,
+          splashFactory: NoSplash.splashFactory,
+          highlightColor: c.hover,
+          hoverColor: c.navHover,
+          onTap: () {
+            store.setWorkspace(isAll ? null : path);
+            Navigator.of(context).pop();
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: DshSpace.md,
+              vertical: DshSpace.sm,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isAll ? Icons.folder_open_outlined : Icons.folder_outlined,
+                  size: 20,
+                  color: c.ink2,
                 ),
-              ),
-              if (selected) Icon(Icons.check, size: 15, color: brand),
-            ],
+                const SizedBox(width: DshSpace.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: (selected ? DshType.sStrong14 : DshType.s14)
+                              .copyWith(color: c.ink)),
+                      if (!isAll)
+                        Text(path,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: DshType.xs13.copyWith(color: c.ink3)),
+                    ],
+                  ),
+                ),
+                if (selected) Icon(Icons.check, size: 18, color: c.ink3),
+              ],
+            ),
           ),
         ),
       ),
@@ -808,7 +842,7 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final c = DshPalette.of(context);
     return SafeArea(
       child: Column(
         children: [
@@ -817,10 +851,10 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
             Align(
               alignment: Alignment.centerLeft,
               child: Padding(
-                padding: const EdgeInsets.only(left: 4, top: 4),
-                child: IconButton(
-                  onPressed: widget.onCancel,
-                  icon: const Icon(Icons.arrow_back, size: 22),
+                padding: const EdgeInsets.only(left: DshSpace.sm, top: DshSpace.sm),
+                child: DshIconButton(
+                  icon: Icons.arrow_back,
+                  onTap: widget.onCancel,
                   tooltip: L10n.t('返回（保留原配置）', 'Back (keep current settings)'),
                 ),
               ),
@@ -829,66 +863,93 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
             child: Center(
               child: SingleChildScrollView(
                 // 键盘弹出/小屏时表单可滚动，避免连接页溢出
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(DshSpace.xl),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
             Text('DSH Remote',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, color: scheme.primary)),
-            const SizedBox(height: 6),
-            Text(L10n.t('手机远程操作 DeepSeek Harness', 'Control DeepSeek Harness from your phone'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
-            const SizedBox(height: 28),
-            FilledButton.icon(
+                style: DshType.xl24.copyWith(color: c.ink)),
+            const SizedBox(height: DshSpace.sm),
+            Text(L10n.t('手机远程操作 DeepSeek Harness', 'Control DeepSeek Harness from your phone'), textAlign: TextAlign.center, style: DshType.xs13.copyWith(color: c.ink3)),
+            const SizedBox(height: DshSpace.xxl),
+            DshButton(
+              label: L10n.t('扫码连接', 'Scan to Connect'),
+              icon: Icons.qr_code_scanner,
+              variant: DshButtonVariant.primary,
+              size: DshButtonSize.lg,
+              expanded: true,
               onPressed: _busy ? null : _scan,
-              icon: const Icon(Icons.qr_code_scanner),
-              label: Text(L10n.t('扫码连接', 'Scan to Connect')),
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: DshSpace.lg),
             Row(
               children: [
-                Expanded(child: Divider(color: scheme.outlineVariant)),
+                const Expanded(child: DshDivider()),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Text(L10n.t('或手动输入', 'Or enter manually'), style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+                  padding: const EdgeInsets.symmetric(horizontal: DshSpace.md),
+                  child: Text(L10n.t('或手动输入', 'Or enter manually'), style: DshType.xxs12.copyWith(color: c.ink3)),
                 ),
-                Expanded(child: Divider(color: scheme.outlineVariant)),
+                const Expanded(child: DshDivider()),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: DshSpace.lg),
             TextField(
               controller: _baseCtrl,
               keyboardType: TextInputType.url,
               decoration: InputDecoration(
                 labelText: L10n.t('电脑地址', 'Computer Address'),
                 hintText: 'http://192.168.x.x:3080',
-                border: const OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: DshSpace.md),
             TextField(
               controller: _tokenCtrl,
               obscureText: true,
               decoration: InputDecoration(
                 labelText: L10n.t('访问口令', 'Token'),
-                border: const OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 20),
-            FilledButton(
+            const SizedBox(height: DshSpace.xl),
+            DshButton(
+              label: _busy ? L10n.t('连接中…', 'Connecting…') : L10n.t('连接', 'Connect'),
+              variant: DshButtonVariant.primary,
+              size: DshButtonSize.lg,
+              expanded: true,
               onPressed: _busy ? null : _connect,
-              child: Text(_busy ? L10n.t('连接中…', 'Connecting…') : L10n.t('连接', 'Connect')),
             ),
-            const SizedBox(height: 12),
-            Text(_status, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
+            const SizedBox(height: DshSpace.md),
+            Text(_status, textAlign: TextAlign.center, style: DshType.xs13.copyWith(color: c.ink2)),
           ],
                 ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 全局 build 异常兜底界面：bg 底 + ink 文字（无 Theme 祖先时按亮色令牌渲染）。
+class _ErrorFallback extends StatelessWidget {
+  const _ErrorFallback(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DshPalette.of(context);
+    return ColoredBox(
+      color: c.bg,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(DshSpace.xxl),
+          child: SelectableText(
+            '${L10n.t('界面异常：', 'UI error:')}\n$message',
+            style: DshType.s14.copyWith(color: c.ink),
+          ),
+        ),
       ),
     );
   }

@@ -1,5 +1,37 @@
 # Changelog
 
+## 未发布 — 界面重构：全面对齐官方 DeepSeek Harness 设计令牌
+
+> 范围：`dsh-mobile-app/`（Flutter App）与 `lib/client.js`（桌面设置页模块）。**行为零变更**：只重写呈现层，公共类名、构造函数签名、回调语义、状态与网络逻辑一律未动；验收门禁 `flutter analyze`（0 issue）、`flutter test`（既有全量用例 + 新增 UI 画廊）。
+
+### 设计令牌层（重写 `lib/theme.dart`、新增 `lib/dsh_kit.dart`）
+
+- **令牌与官方同源**：配色、圆角、字体、描边、高度、动效曲线全部取自官方 `packages/client/ui-theme/src/styles/`（`design-platform.css` / `gradient-shadow-text.css` / `base.css`），命名与 `--dsw-alias-*` 一一对应（`DshPalette`），浅色/深色两套语义值完整落地。
+- **主操作不再是蓝色**：官方 `--dsw-alias-brand-primary` 浅色下是近黑 `#0F1115`、深色下是近白 `#F9FAFB`；蓝色只保留给链接与业务强调（`link` / `business`）。状态色换成官方 `state-success/warn/error`（`#22C55E` / `#F59E0B` / `#EC1313`，深色错误 `#F25A5A`）。
+- **圆角按官方规范选档**（docs/ui-radius.md）：4 / 8 / 12 / 16 / 20 / 28，40px 图标方块用组件特例档 10；不再出现 6/9/10/14/22 这类散值。
+- **字体阶梯**：14/22、13/20、12/18、11/14，以及 Markdown 阶梯（H1 21/30·700 … 正文 14/24·400、代码 11/19·mono）全部对齐官方。
+- **发丝描边 0.5px**：卡片/分隔线/输入框统一发丝，状态色描边保持 1px；卡片靠「填充 + 描边」分层不加投影，浮层与输入框才用 `--dsw-elevation-*` 对应的高度。
+- **新增 `lib/dsh_kit.dart`**：官方组件的 Flutter 版 —— `DshPage` / `DshAppBar` / `DshSectionHeader` / `DshCard` / `DshCardGroup` / `DshTile` / `DshNavItem` / `DshButton` / `DshCircleButton` / `DshIconButton` / `DshTag` / `DshPill` / `DshStatusDot` / `DshDivider` / `DshSegmented` / `DshSheet` + `showDshSheet` / `DshToast` / `DshEmpty` / `DshBanner` / `DshProgressBar` / `DshDots` / `DshLoading` / `DshError`。
+
+### 逐页改造
+
+- **应用外壳**：官方标题栏（52 高、透明底、底部发丝线、标题 16/24·500）；抽屉改官方侧栏（`sidebar` 底、导航行 R12、选中底 `navActive`、工作区分组标题）；全局通知横幅改官方 toast 面；连接页与对话框全令牌化；`ErrorWidget` 兜底不再写死颜色。
+- **首页**：欢迎标题 20/28；连接状态行改状态点 + 标签；最近会话改分组标题 + 设置卡片 + 列表行；入口按钮走官方按钮。
+- **会话列表**：列表底改 `sidebar`；工作区筛选改胶囊选择器；活跃/归档改官方分段控件；会话行改官方行语言；归档项用三级文字降调而非铺灰底。
+- **通知页**：官方标题栏 + 列表行（状态图标 / 标题 / 详情 / 时间）；未读用状态点；多选态用 `navAccent` 底 + 选中图标按钮；删除走 danger 语义；空态/错误态用统一空状态组件。
+- **对话页**：用户消息改官方气泡（R16、`bubble` 填充、无投影）；助手消息去气泡，全宽正文 14/24；工具活动卡与时间线卡改 R16 卡片 + 状态点；思考链折叠行 + 左侧发丝竖线；活动条改 `module` 底 + 三点脉冲；**输入区改官方 composer**（R28 + `input` 面 + soft 高度 + 发丝边，圆形 36 发送键近黑填充）；待办面板、队列、审批卡、消息操作条、上下文占用环、回到底部浮钮全部换令牌与官方几何。流式追加、微信式无限上翻、图片预览、文件下载、任务取消、队列编辑等交互一律保留（上下文占用环仍在 70% / 90% 切换警告与危险色）。
+- **设置 / 提供商 / 用量 / 更新**：设置页改「分组标题 + 设置卡片 + 列表行」官方版式（开关统一 `DshSwitch`，危险项 danger 语义）；**环境诊断从等宽纯文本改为分组卡片 + 状态圆点**（复制用原文一字未动）；提供商页改搜索框 + 40px R10 首字母方块 + 状态标签，编辑弹层改官方底部弹层；用量页大数字走 20/28、额度改细进度条（正常 / 接近上限 / 超限三档语义色）；更新弹窗统一主题对话框几何。
+- **Markdown 与文档**：标题/正文/表格/行内代码/代码块按官方 Markdown 阶梯与令牌（代码块 R16 + banner 底色、引用块发丝竖线、链接 500 字重无下划线）；文档阅读页改「纸张卡片」版式，文档列表行改官方行语言 + R10 文件类型方块。
+- **公式、问询卡**：公式颜色改令牌；内核问询/审批卡改 R20 卡片 + 官方选项行 + 官方按钮。
+- **弹层**：目录选择 / 模型选择 / 预设选择 / 会话工具（任务·子代理·目标）统一官方底部弹层（R28 顶角 + 拖拽把手 + 内置键盘避让），三页签改官方分段控件。
+- **桌面设置页模块**（`lib/client.js`）：改用官方真实存在的语义令牌，去掉此前引用的不存在变量名（如 `--dsw-alias-divider-strong`）与字面兜底值。
+
+### 视觉走查（新增）
+
+- `dsh-mobile-app/UI_STYLE_GUIDE.md` — 样式契约：令牌表、圆角选档、字体阶梯、组件清单、官方版式特征。
+- `docs/10-ui-design-system.md` — 设计系统来源、三层结构、硬性规矩、走查与二次开发指引。
+- `dsh-mobile-app/test/ui_gallery_test.dart` — 用真实组件渲染 golden 画廊（令牌/组件与对话版式各出浅色 + 深色），无需真机即可核对样式；产物同步到 `docs/screenshots/ui-*.png` 并在 README 展示。
+
 ## v3.1.5（2026-09-22，issue #12 / #15 / #19 / #22 / #24，PR #11 / #18 / #21）— 对话时间线 + 用量额度 + 复制对话 + 安全加固
 
 > 版本：插件 `3.1.5` / App `3.1.5+22`。

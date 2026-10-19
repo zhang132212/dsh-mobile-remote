@@ -1,4 +1,7 @@
 // 设置页（对齐网页端 settings screen）：连接/默认配置/账户/显示/关于
+//
+// 版式沿用官方设置页：DshSectionHeader 分组 + DshCardGroup（R20 卡片）收行，
+// 行内统一 DshTile（左图标 20 + 标题 s14 + 副标题 xs13 + 右侧值/开关/箭头）。
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -7,17 +10,18 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api.dart';
+import '../dsh_kit.dart';
 import '../floating.dart';
+import '../fmt.dart';
 import '../l10n.dart';
 import '../logger.dart';
-import '../update/update_ui.dart';
 import '../models.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../toast.dart';
-import '../fmt.dart';
-import 'sheets.dart';
+import '../update/update_ui.dart';
 import 'providers_screen.dart';
+import 'sheets.dart';
 import 'usage_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -87,15 +91,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 '开启悬浮球需要在系统设置中允许「显示在其他应用上层」。\n点击【去开启】跳转系统设置。',
                 'The floating bubble needs the "display over other apps" permission.\nTap Open Settings to grant it.',
               ),
+              style: DshType.s14.copyWith(
+                color: DshPalette.of(ctx).ink2,
+              ),
             ),
             actions: [
-              TextButton(
+              DshButton(
+                label: L10n.t('取消', 'Cancel'),
+                variant: DshButtonVariant.ghost,
+                size: DshButtonSize.sm,
                 onPressed: () => Navigator.of(ctx).pop(false),
-                child: Text(L10n.t('取消', 'Cancel')),
               ),
-              FilledButton(
+              DshButton(
+                label: L10n.t('去开启', 'Open Settings'),
+                size: DshButtonSize.sm,
                 onPressed: () => Navigator.of(ctx).pop(true),
-                child: Text(L10n.t('去开启', 'Open Settings')),
               ),
             ],
           ),
@@ -153,49 +163,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final candidates = api.baseUrls;
     if (candidates.isEmpty) return;
     final current = api.baseUrl;
-    final choice = await showModalBottomSheet<String>(
+    final c = DshPalette.of(context);
+    final choice = await showDshSheet<String>(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      builder: (ctx) => DshSheet(
+        title: L10n.t('选择连接地址', 'Choose address'),
+        child: DshCardGroup(
+          margin: EdgeInsets.zero,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
-              child: Text(
-                L10n.t('选择连接地址', 'Choose address'),
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            for (final addr in candidates)
+              DshTile(
+                dense: true,
+                title: addr,
+                selected: addr == current,
+                trailing: addr == current
+                    ? Icon(Icons.check, size: 16, color: c.brand)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(addr),
               ),
-            ),
-            // 候选地址随使用动态累积（局域网/组网/历史地址），列表区可滚动防溢出
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final c in candidates)
-                    ListTile(
-                      dense: true,
-                      leading: Icon(
-                        c == current
-                            ? Icons.check_circle
-                            : Icons.circle_outlined,
-                        size: 18,
-                        color: c == current
-                            ? DshColors.brand(context)
-                            : DshColors.ink3(context),
-                      ),
-                      title: Text(
-                        c,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          color: c == current ? DshColors.brand(context) : null,
-                        ),
-                      ),
-                      onTap: () => Navigator.of(ctx).pop(c),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
           ],
         ),
       ),
@@ -287,47 +272,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _pickThreshold() async {
     final presets = [5.0, 10.0, 20.0, 50.0];
     final current = widget.store.balanceThreshold;
-    final scheme = Theme.of(context);
-    final brand = DshColors.brand(context);
-    final selected = await showModalBottomSheet<double>(
+    final c = DshPalette.of(context);
+    final selected = await showDshSheet<double>(
       context: context,
-      backgroundColor: scheme.scaffoldBackgroundColor,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      builder: (ctx) => DshSheet(
+        title: L10n.t('余额预警阈值', 'Low-balance threshold'),
+        child: DshCardGroup(
+          margin: EdgeInsets.zero,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  L10n.t('余额预警阈值', 'Low-balance threshold'),
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-            ...presets.map(
-              (p) => ListTile(
+            for (final p in presets)
+              DshTile(
                 dense: true,
-                title: Text(
-                  '¥${_fmtThreshold(p)}',
-                  style: const TextStyle(fontSize: 15),
-                ),
+                title: '¥${_fmtThreshold(p)}',
+                selected: p == current,
                 trailing: p == current
-                    ? Icon(Icons.check, size: 18, color: brand)
+                    ? Icon(Icons.check, size: 16, color: c.brand)
                     : null,
                 onTap: () => Navigator.of(ctx).pop(p),
               ),
-            ),
-            ListTile(
+            DshTile(
               dense: true,
-              title: Text(
-                L10n.t('自定义…', 'Custom…'),
-                style: const TextStyle(fontSize: 15),
-              ),
+              title: L10n.t('自定义…', 'Custom…'),
               onTap: () async {
                 Navigator.of(ctx).pop();
                 final ctrl = TextEditingController(
@@ -338,10 +303,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 final v = await showDialog<String>(
                   context: context,
                   builder: (dctx) => AlertDialog(
-                    title: Text(
-                      L10n.t('自定义阈值（元）', 'Custom threshold (¥)'),
-                      style: const TextStyle(fontSize: 16),
-                    ),
+                    title: Text(L10n.t('自定义阈值（元）', 'Custom threshold (¥)')),
                     content: TextField(
                       controller: ctrl,
                       autofocus: true,
@@ -351,16 +313,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       decoration: const InputDecoration(hintText: '10'),
                     ),
                     actions: [
-                      TextButton(
+                      DshButton(
+                        label: L10n.t('取消', 'Cancel'),
+                        variant: DshButtonVariant.ghost,
+                        size: DshButtonSize.sm,
                         onPressed: () => Navigator.of(dctx).pop(),
-                        child: Text(L10n.t('取消', 'Cancel')),
                       ),
-                      TextButton(
+                      DshButton(
+                        label: L10n.t('确定', 'OK'),
+                        size: DshButtonSize.sm,
                         onPressed: () => Navigator.of(dctx).pop(ctrl.text),
-                        child: Text(
-                          L10n.t('确定', 'OK'),
-                          style: TextStyle(color: brand),
-                        ),
                       ),
                     ],
                   ),
@@ -385,7 +347,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }
               },
             ),
-            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -617,96 +578,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Widget _card(String title, List<Widget> children) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: DshColors.surface(context),
-        borderRadius: BorderRadius.circular(DshTheme.radiusMd),
-        boxShadow: Theme.of(context).brightness == Brightness.dark
-            ? DshTheme.shadowDark
-            : DshTheme.shadow,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 10, bottom: 2),
-              child: Text(
-                title.toUpperCase(),
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.5,
-                  color: DshColors.ink3(context),
-                ),
-              ),
-            ),
-            ...children,
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _row({
-    required Widget leading,
-    required String title,
-    String? sub,
-    Widget? trailing,
-    VoidCallback? onTap,
-  }) {
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: line, width: 1)),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              leading is Icon ? leading.icon : Icons.circle,
-              size: 15,
-              color: ink3,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontSize: 14)),
-                  if (sub != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 1),
-                      child: Text(
-                        sub,
-                        style: TextStyle(fontSize: 11, color: ink3),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            if (trailing != null) ...[trailing],
-            if (onTap != null) Icon(Icons.chevron_right, size: 16, color: ink3),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final store = widget.store;
-    final ink3 = DshColors.ink3(context);
-    final brand = DshColors.brand(context);
-    final danger = DshColors.danger(context);
-    final ok = DshColors.ok(context);
-    final warn = DshColors.warn(context);
+    final c = DshPalette.of(context);
 
     String permName(String? id) => permNameOf(id) ?? '…';
     String presetName(String? id) => switch (id) {
@@ -717,326 +592,497 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _ => '…',
     };
 
+    // 右侧取值文本（语言、模型名、预设名）：xs13 · tertiary。
+    Widget value(String text) =>
+        Text(text, style: DshType.xs13.copyWith(color: c.ink3));
+
+    final connColor = switch (store.connState) {
+      'connected' => c.ok,
+      'connecting' => c.warn,
+      _ => c.ink3,
+    };
+    final connText = switch (store.connState) {
+      'connected' => L10n.t('已连接', 'Connected'),
+      'connecting' => L10n.t('连接中…', 'Connecting…'),
+      _ => L10n.t('离线 · 自动重连', 'Offline · reconnecting'),
+    };
+
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.only(bottom: DshSpace.xxl),
       children: [
-        _card(L10n.t('连接', 'Connection'), [
-          _row(
-            leading: const Icon(Icons.computer_outlined),
-            title: L10n.t('电脑地址', 'PC address'),
-            sub: api.baseUrls.length > 1
-                ? L10n.t(
-                    '${api.baseUrl} · 共 ${api.baseUrls.length} 个地址自动切换 · 点按手动切换',
-                    '${api.baseUrl} · ${api.baseUrls.length} addresses · tap to switch',
-                  )
-                : api.baseUrl,
-            onTap: () => _pickAddress(),
-            // 连接状态实时显示（修复：旧版写死「已连接」，断线也显示绿色已连接）
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: switch (store.connState) {
-                      'connected' => ok,
-                      'connecting' => warn,
-                      _ => ink3,
-                    },
-                    shape: BoxShape.circle,
+        // ── 连接 ──
+        DshSectionHeader(L10n.t('连接', 'Connection')),
+        DshCardGroup(
+          children: [
+            DshTile(
+              leading: const Icon(Icons.computer_outlined),
+              title: L10n.t('电脑地址', 'PC address'),
+              subtitle: api.baseUrls.length > 1
+                  ? L10n.t(
+                      '${api.baseUrl} · 共 ${api.baseUrls.length} 个地址自动切换 · 点按手动切换',
+                      '${api.baseUrl} · ${api.baseUrls.length} addresses · tap to switch',
+                    )
+                  : api.baseUrl,
+              chevron: true,
+              // 连接状态实时显示（修复：旧版写死「已连接」，断线也显示绿色已连接）
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DshStatusDot(color: connColor),
+                  const SizedBox(width: DshSpace.xs),
+                  Text(
+                    connText,
+                    style: DshType.xs13.copyWith(color: connColor),
                   ),
-                ),
-                const SizedBox(width: 5),
-                Text(
-                  switch (store.connState) {
-                    'connected' => L10n.t('已连接', 'Connected'),
-                    'connecting' => L10n.t('连接中…', 'Connecting…'),
-                    _ => L10n.t('离线 · 自动重连', 'Offline · reconnecting'),
-                  },
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: switch (store.connState) {
-                      'connected' => ok,
-                      'connecting' => warn,
-                      _ => ink3,
-                    },
-                  ),
-                ),
-              ],
+                ],
+              ),
+              onTap: () => _pickAddress(),
             ),
-          ),
-          _row(
-            leading: const Icon(Icons.settings_outlined),
-            title: L10n.t('重新配置连接', 'Reconfigure connection'),
-            sub: L10n.t('更换电脑地址或访问口令', 'Change PC address or token'),
-            trailing: Text(
-              L10n.t('配置 ▸', 'Configure ▸'),
-              style: TextStyle(fontSize: 12, color: brand),
+            DshTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: L10n.t('重新配置连接', 'Reconfigure connection'),
+              subtitle: L10n.t('更换电脑地址或访问口令', 'Change PC address or token'),
+              chevron: true,
+              onTap: () => widget.onReconfigure(),
             ),
-            onTap: () => widget.onReconfigure(),
-          ),
-        ]),
+          ],
+        ),
         // v3.1.2：推送通道自检（配置在电脑端 cordis.patch.yml 的 pushUrls）
-        _card(L10n.t('通知', 'Notifications'), [
-          _row(
-            leading: const Icon(Icons.notifications_active_outlined),
-            title: L10n.t('发送测试通知', 'Send test notification'),
-            sub: L10n.t(
-              '验证推送通道（电脑端 cordis.patch.yml 配置）',
-              'Verify push channels (configured on the PC)',
+        DshSectionHeader(L10n.t('通知', 'Notifications')),
+        DshCardGroup(
+          children: [
+            DshTile(
+              leading: const Icon(Icons.notifications_active_outlined),
+              title: L10n.t('发送测试通知', 'Send test notification'),
+              subtitle: L10n.t(
+                '验证推送通道（电脑端 cordis.patch.yml 配置）',
+                'Verify push channels (configured on the PC)',
+              ),
+              chevron: true,
+              onTap: _sendTestPush,
             ),
-            trailing: Text(
-              L10n.t('发送 ▸', 'Send ▸'),
-              style: TextStyle(fontSize: 12, color: brand),
+          ],
+        ),
+        DshSectionHeader(L10n.t('默认配置', 'Defaults')),
+        DshCardGroup(
+          children: [
+            DshTile(
+              leading: const Icon(Icons.security_outlined),
+              title: L10n.t('默认权限预设', 'Default permission'),
+              subtitle: L10n.t('作用于之后新建的会话', 'Applies to new sessions'),
+              chevron: true,
+              trailing: value(
+                permName(store.catalog?.defaults['permissionPreset'] as String?),
+              ),
+              onTap: () => _pickDefaultPerm(store),
             ),
-            onTap: _sendTestPush,
-          ),
-        ]),
-        _card(L10n.t('默认配置', 'Defaults'), [
-          _row(
-            leading: const Icon(Icons.security_outlined),
-            title: L10n.t('默认权限预设', 'Default permission'),
-            sub: L10n.t('作用于之后新建的会话', 'Applies to new sessions'),
-            trailing: Text(
-              permName(store.catalog?.defaults['permissionPreset'] as String?),
-              style: TextStyle(fontSize: 12, color: brand),
+            DshTile(
+              leading: const Icon(Icons.bolt_outlined),
+              title: L10n.t('默认 Agent 预设', 'Default agent preset'),
+              subtitle: L10n.t('作用于之后新建的会话', 'Applies to new sessions'),
+              chevron: true,
+              trailing: value(
+                presetName(store.catalog?.defaults['agentPreset'] as String?),
+              ),
+              onTap: () => _pickDefaultPreset(store),
             ),
-            onTap: () => _pickDefaultPerm(store),
-          ),
-          _row(
-            leading: const Icon(Icons.bolt_outlined),
-            title: L10n.t('默认 Agent 预设', 'Default agent preset'),
-            sub: L10n.t('作用于之后新建的会话', 'Applies to new sessions'),
-            trailing: Text(
-              presetName(store.catalog?.defaults['agentPreset'] as String?),
-              style: TextStyle(fontSize: 12, color: brand),
+            DshTile(
+              leading: const Icon(Icons.dns_outlined),
+              title: L10n.t('模型提供商', 'Model providers'),
+              subtitle: L10n.t(
+                '与 PC 端「设置 → 模型」同一配置通道',
+                'Same channel as PC Settings → Models',
+              ),
+              chevron: true,
+              onTap: () {
+                // Phase 2：与模型弹层共用提供商页打开入口
+                openProviders(context, store);
+              },
             ),
-            onTap: () => _pickDefaultPreset(store),
-          ),
-          _row(
-            leading: const Icon(Icons.dns_outlined),
-            title: L10n.t('模型提供商', 'Model providers'),
-            sub: L10n.t(
-              '与 PC 端「设置 → 模型」同一配置通道',
-              'Same channel as PC Settings → Models',
-            ),
-            trailing: Text(
-              L10n.t('管理', 'Manage'),
-              style: TextStyle(fontSize: 12, color: brand),
-            ),
-            onTap: () {
-              // Phase 2：与模型弹层共用提供商页打开入口
-              openProviders(context, store);
-            },
-          ),
-        ]),
-        _card(L10n.t('账户', 'Account'), [
-          _row(
-            leading: const Icon(Icons.account_balance_wallet_outlined),
-            title: L10n.t('用量与额度', 'Usage & allowance'),
-            sub: _usageLabel,
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _usage == null
-                      ? '—'
-                      : '${_usage!.sources.where((source) => source.available).length}',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: _deepSeekLow ? danger : brand,
-                  ),
-                ),
-                if (_usageBusy)
-                  const Padding(
-                    padding: EdgeInsets.only(left: 8),
-                    child: SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+          ],
+        ),
+        DshSectionHeader(L10n.t('账户', 'Account')),
+        DshCardGroup(
+          children: [
+            DshTile(
+              leading: const Icon(Icons.account_balance_wallet_outlined),
+              title: L10n.t('用量与额度', 'Usage & allowance'),
+              subtitle: _usageLabel,
+              chevron: true,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _usage == null
+                        ? '—'
+                        : '${_usage!.sources.where((source) => source.available).length}',
+                    style: DshType.xs13.copyWith(
+                      color: _deepSeekLow ? c.danger : c.ink3,
                     ),
                   ),
-              ],
-            ),
-            onTap: _openUsage,
-          ),
-          _row(
-            leading: const Icon(Icons.add_card_outlined),
-            title: L10n.t('充值', 'Top up'),
-            sub: L10n.t('跳转 DeepSeek 开放平台', 'Go to DeepSeek Open Platform'),
-            trailing: Text(
-              L10n.t('去充值 ▸', 'Top up ▸'),
-              style: TextStyle(fontSize: 12, color: brand),
-            ),
-            onTap: () => launchUrl(
-              // 以电脑端插件配置为准（catalog.rechargeUrl），缺省回退官方充值页
-              Uri.parse(
-                store.catalog?.rechargeUrl ??
-                    'https://platform.deepseek.com/top_up',
+                  if (_usageBusy)
+                    const Padding(
+                      padding: EdgeInsets.only(left: DshSpace.sm),
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                ],
               ),
-              mode: LaunchMode.externalApplication,
+              onTap: _openUsage,
             ),
-          ),
-          _row(
-            leading: const Icon(Icons.notifications_active_outlined),
-            title: L10n.t('余额预警', 'Low-balance alert'),
-            // v2.7.1：副标题动态显示当前阈值
-            sub:
-                L10n.t('余额低于 ¥', 'Remind to top up when balance is below ¥') +
-                _fmtThreshold(store.balanceThreshold) +
-                L10n.t(' 时提醒充值（点此修改）', ' — tap to change'),
-            onTap: _pickThreshold,
-            trailing: DshSwitch(
-              value: store.balanceAlert,
-              onChanged: (v) => store.setBalanceAlert(v),
+            DshTile(
+              leading: const Icon(Icons.add_card_outlined),
+              title: L10n.t('充值', 'Top up'),
+              subtitle: L10n.t(
+                '跳转 DeepSeek 开放平台',
+                'Go to DeepSeek Open Platform',
+              ),
+              chevron: true,
+              onTap: () => launchUrl(
+                // 以电脑端插件配置为准（catalog.rechargeUrl），缺省回退官方充值页
+                Uri.parse(
+                  store.catalog?.rechargeUrl ??
+                      'https://platform.deepseek.com/top_up',
+                ),
+                mode: LaunchMode.externalApplication,
+              ),
             ),
-          ),
-        ]),
-        _card(L10n.t('显示', 'Display'), [
-          _row(
-            leading: const Icon(Icons.psychology_outlined),
-            title: L10n.t('思考内容', 'Thinking content'),
-            sub: L10n.t(
-              '活动条思考状态展开时是否显示思考原文（默认关：只显示状态）',
-              'Show raw thinking text when expanded (default off: status only)',
+            DshTile(
+              leading: const Icon(Icons.notifications_active_outlined),
+              title: L10n.t('余额预警', 'Low-balance alert'),
+              // v2.7.1：副标题动态显示当前阈值
+              subtitle:
+                  L10n.t('余额低于 ¥', 'Remind to top up when balance is below ¥') +
+                  _fmtThreshold(store.balanceThreshold) +
+                  L10n.t(' 时提醒充值（点此修改）', ' — tap to change'),
+              trailing: DshSwitch(
+                value: store.balanceAlert,
+                onChanged: (v) => store.setBalanceAlert(v),
+              ),
+              onTap: _pickThreshold,
             ),
-            trailing: DshSwitch(
-              value: store.showReasoning,
-              onChanged: (v) => store.setShowReasoning(v),
+          ],
+        ),
+        DshSectionHeader(L10n.t('显示', 'Display')),
+        DshCardGroup(
+          children: [
+            DshTile(
+              leading: const Icon(Icons.psychology_outlined),
+              title: L10n.t('思考内容', 'Thinking content'),
+              subtitle: L10n.t(
+                '活动条思考状态展开时是否显示思考原文（默认关：只显示状态）',
+                'Show raw thinking text when expanded (default off: status only)',
+              ),
+              trailing: DshSwitch(
+                value: store.showReasoning,
+                onChanged: (v) => store.setShowReasoning(v),
+              ),
             ),
-          ),
-          _row(
-            leading: const Icon(Icons.account_tree_outlined),
-            title: L10n.t('思维链默认展开', 'Thinking chain default expanded'),
-            sub: L10n.t(
-              '回复里的「思维链」块默认折叠还是展开（单条消息仍可点按切换）',
-              'Whether the thinking-chain block in replies is expanded by default (each message stays toggleable)',
+            DshTile(
+              leading: const Icon(Icons.account_tree_outlined),
+              title: L10n.t('思维链默认展开', 'Thinking chain default expanded'),
+              subtitle: L10n.t(
+                '回复里的「思维链」块默认折叠还是展开（单条消息仍可点按切换）',
+                'Whether the thinking-chain block in replies is expanded by default (each message stays toggleable)',
+              ),
+              trailing: DshSwitch(
+                value: store.reasoningDefaultExpanded,
+                onChanged: (v) => store.setReasoningDefaultExpanded(v),
+              ),
             ),
-            trailing: DshSwitch(
-              value: store.reasoningDefaultExpanded,
-              onChanged: (v) => store.setReasoningDefaultExpanded(v),
+            DshTile(
+              leading: const Icon(Icons.bug_report_outlined),
+              title: L10n.t('对话调试模式', 'Conversation debug mode'),
+              subtitle: L10n.t(
+                '显示工具原始参数、结果、事件序号与未知可见事件（默认关闭）',
+                'Show raw tool IO, event metadata and unknown visible events (off by default)',
+              ),
+              trailing: DshSwitch(
+                value: store.timelineDebug,
+                onChanged: (v) => store.setTimelineDebug(v),
+              ),
             ),
-          ),
-          _row(
-            leading: const Icon(Icons.bug_report_outlined),
-            title: L10n.t('对话调试模式', 'Conversation debug mode'),
-            sub: L10n.t('显示工具原始参数、结果、事件序号与未知可见事件（默认关闭）',
-                'Show raw tool IO, event metadata and unknown visible events (off by default)'),
-            trailing: DshSwitch(
-              value: store.timelineDebug,
-              onChanged: (v) => store.setTimelineDebug(v),
-            ),
-          ),
-          _row(
-            leading: const Icon(Icons.dark_mode_outlined),
-            title: L10n.t('深色模式', 'Dark mode'),
-            sub: switch (store.darkMode) {
-              'dark' => L10n.t('已选深色', 'Dark'),
-              'light' => L10n.t('已选浅色', 'Light'),
-              _ => L10n.t('跟随系统', 'System'),
-            },
-            trailing: GestureDetector(
-              onTap: () {
-                final next = switch (store.darkMode) {
-                  'system' => 'dark',
-                  'dark' => 'light',
-                  _ => 'system',
-                };
-                store.setDarkMode(next);
-              },
-              child: Text(switch (store.darkMode) {
-                'dark' => L10n.t('深色', 'Dark'),
-                'light' => L10n.t('浅色', 'Light'),
+            DshTile(
+              leading: const Icon(Icons.dark_mode_outlined),
+              title: L10n.t('深色模式', 'Dark mode'),
+              subtitle: switch (store.darkMode) {
+                'dark' => L10n.t('已选深色', 'Dark'),
+                'light' => L10n.t('已选浅色', 'Light'),
                 _ => L10n.t('跟随系统', 'System'),
-              }, style: TextStyle(fontSize: 13, color: brand)),
+              },
+              // 三态循环：点右侧取值在 系统 → 深色 → 浅色 之间切换
+              trailing: GestureDetector(
+                onTap: () {
+                  final next = switch (store.darkMode) {
+                    'system' => 'dark',
+                    'dark' => 'light',
+                    _ => 'system',
+                  };
+                  store.setDarkMode(next);
+                },
+                child: value(switch (store.darkMode) {
+                  'dark' => L10n.t('深色', 'Dark'),
+                  'light' => L10n.t('浅色', 'Light'),
+                  _ => L10n.t('跟随系统', 'System'),
+                }),
+              ),
             ),
-          ),
-          _row(
-            leading: const Icon(Icons.language_outlined),
-            title: L10n.t('语言', 'Language'),
-            sub: L10n.t('界面显示语言（即时生效）', 'UI language (applies immediately)'),
-            onTap: () => _pickLanguage(store),
-            trailing: Text(
-              store.language == 'en' ? 'English' : '中文',
-              style: TextStyle(fontSize: 13, color: brand),
+            DshTile(
+              leading: const Icon(Icons.language_outlined),
+              title: L10n.t('语言', 'Language'),
+              subtitle: L10n.t(
+                '界面显示语言（即时生效）',
+                'UI language (applies immediately)',
+              ),
+              chevron: true,
+              trailing: value(store.language == 'en' ? 'English' : '中文'),
+              onTap: () => _pickLanguage(store),
             ),
-          ),
-          _row(
-            leading: const Icon(Icons.bubble_chart_outlined),
-            title: L10n.t('悬浮球', 'Floating bubble'),
-            sub: L10n.t(
-              '桌面悬浮球：agent 运行/通知/余额低时亮起，单击展开面板（默认关）',
-              'Floating bubble: lights up on activity, tap to open panel (off by default)',
+            DshTile(
+              leading: const Icon(Icons.bubble_chart_outlined),
+              title: L10n.t('悬浮球', 'Floating bubble'),
+              subtitle: L10n.t(
+                '桌面悬浮球：agent 运行/通知/余额低时亮起，单击展开面板（默认关）',
+                'Floating bubble: lights up on activity, tap to open panel (off by default)',
+              ),
+              trailing: DshSwitch(value: _bubbleOn, onChanged: _toggleBubble),
             ),
-            trailing: DshSwitch(value: _bubbleOn, onChanged: _toggleBubble),
-          ),
-          _row(
-            leading: const Icon(Icons.help_outline),
-            title: L10n.t('悬浮球操作说明', 'Bubble guide'),
-            sub: L10n.t('状态含义与手势操作', 'Status meaning and gestures'),
-            trailing: Text(
-              L10n.t('查看 ▸', 'View ▸'),
-              style: TextStyle(fontSize: 12, color: brand),
+            DshTile(
+              leading: const Icon(Icons.help_outline),
+              title: L10n.t('悬浮球操作说明', 'Bubble guide'),
+              subtitle: L10n.t('状态含义与手势操作', 'Status meaning and gestures'),
+              chevron: true,
+              onTap: _showBubbleGuide,
             ),
-            onTap: _showBubbleGuide,
+          ],
+        ),
+        DshSectionHeader(L10n.t('关于', 'About')),
+        DshCardGroup(
+          children: [
+            DshTile(
+              leading: const Icon(Icons.info_outline),
+              title: L10n.t('版本', 'Version'),
+              subtitle:
+                  'App v${_appVersion.isEmpty ? '…' : _appVersion}'
+                  ' · ${L10n.t('插件', 'plugin')} v${api.pluginVersion.isEmpty ? '…' : api.pluginVersion}',
+            ),
+            // v3.2.1：应用内更新入口——检测到新版后可直接覆盖安装（同签名，无需卸载）
+            DshTile(
+              leading: const Icon(Icons.system_update_alt),
+              title: L10n.t('检查更新', 'Check for updates'),
+              subtitle: L10n.t(
+                '有新版本会提示，可直接覆盖安装',
+                'Prompts on new versions; installs right over the current app',
+              ),
+              trailing: DshButton(
+                label: L10n.t('检查', 'Check'),
+                size: DshButtonSize.sm,
+                variant: DshButtonVariant.outline,
+                onPressed: () {
+                  checkUpdateInteractive(context);
+                },
+              ),
+            ),
+            DshTile(
+              leading: const Icon(Icons.monitor_heart_outlined),
+              title: L10n.t('环境诊断', 'Diagnostics'),
+              subtitle: _diagLoaded
+                  ? '${L10n.t('检测完成 · ', 'Done · ')}$_diagTime'
+                  : L10n.t('检测当前环境各项能力', 'Check environment capabilities'),
+              trailing: DshButton(
+                label: L10n.t('查看', 'View'),
+                size: DshButtonSize.sm,
+                variant: DshButtonVariant.outline,
+                onPressed: _openDiag,
+              ),
+            ),
+            DshTile(
+              leading: const Icon(Icons.article_outlined),
+              title: L10n.t('应用日志', 'App log'),
+              subtitle: L10n.t(
+                '启动/连接/加载事件（排障用）',
+                'Startup/connection/load events (troubleshooting)',
+              ),
+              trailing: DshButton(
+                label: L10n.t('查看', 'View'),
+                size: DshButtonSize.sm,
+                variant: DshButtonVariant.outline,
+                onPressed: _openLog,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ── 环境诊断：状态圆点 + 分组卡片（官方设置卡片版式） ──
+
+  /// 诊断分组：小节标题 + 一张 R20 卡片。
+  Widget _diagSection(String title, List<Widget> rows) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DshSectionHeader(
+          title,
+          padding: const EdgeInsets.only(
+            top: DshSpace.lg,
+            bottom: DshSpace.sm,
           ),
+        ),
+        DshCardGroup(margin: EdgeInsets.zero, children: rows),
+      ],
+    );
+  }
+
+  /// 诊断信息行：标签 + 取值（短值走右侧 trailing，长值走副标题换行省略）。
+  Widget _diagValueTile(String label, String value, {bool inline = false}) {
+    final c = DshPalette.of(context);
+    return DshTile(
+      dense: true,
+      title: label,
+      subtitle: inline ? null : value,
+      trailing:
+          inline ? Text(value, style: DshType.xs13.copyWith(color: c.ink3)) : null,
+    );
+  }
+
+  /// 服务项行：✅/❌ 统一用状态圆点（c.ok / c.danger）+ 服务名。
+  Widget _diagServiceTile(String key, bool ok) {
+    final c = DshPalette.of(context);
+    final name = _diagName('services', key);
+    return DshTile(
+      dense: true,
+      leading: DshStatusDot(color: ok ? c.ok : c.danger),
+      title: name,
+      subtitle: key == name ? null : key,
+    );
+  }
+
+  /// 端点实测行：布尔 → 圆点；数值 → 0 正常/否则警告；其余按值直读。
+  Widget _diagCheckTile(String key, dynamic v) {
+    final c = DshPalette.of(context);
+    final name = _diagName('checks', key);
+    final shown = key == name ? name : '$name ($key)';
+    if (key == 'approvalMode') {
+      // v3.1.3：审批策略取值说明（both 双端同卡 / mobile 手机独占 / desktop 仅桌面）
+      final m = v == 'both'
+          ? L10n.t('both · 双端同卡，先答生效', 'both · both ends, first answer wins')
+          : v == 'mobile'
+          ? L10n.t('mobile · 手机在线独占', 'mobile · phone-exclusive while online')
+          : v == 'desktop'
+          ? L10n.t('desktop · 仅桌面 GUI', 'desktop · desktop GUI only')
+          : '${v ?? '?'}';
+      return DshTile(
+        dense: true,
+        leading: const Icon(Icons.info_outline),
+        title: shown,
+        subtitle: m,
+      );
+    }
+    if (v is bool) {
+      return DshTile(
+        dense: true,
+        leading: DshStatusDot(color: v ? c.ok : c.danger),
+        title: shown,
+      );
+    }
+    if (v is num) {
+      // 计数字段（如 pendingFrames 挂起待答数）：0 正常，>0 表示有问询/审批待处理
+      return DshTile(
+        dense: true,
+        leading: DshStatusDot(color: v == 0 ? c.ok : c.warn),
+        title: shown,
+        subtitle: v == 0
+            ? '$v'
+            : '$v · ${L10n.t('有审批/问询待处理', 'approval/question pending')}',
+      );
+    }
+    return DshTile(
+      dense: true,
+      leading: const Icon(Icons.info_outline),
+      title: shown,
+      subtitle: '${v ?? '?'}',
+    );
+  }
+
+  /// 诊断内容（底部弹层正文）。
+  Widget _diagContent() {
+    final c = DshPalette.of(context);
+    final d = _diag;
+    if (d == null) {
+      return DshBanner(
+        message: L10n.t(
+          '检测失败：无法读取电脑端环境信息，请确认连接后重试。',
+          'Check failed: could not read the desktop environment. Reconnect and retry.',
+        ),
+        icon: Icons.error_outline,
+        tone: DshBannerTone.danger,
+      );
+    }
+    final runtime = d['runtime'] as Map<String, dynamic>? ?? const {};
+    final form = runtime['form'];
+    final formText = form == 'desktop'
+        ? 'desktop · ${L10n.t('桌面版', 'DSH Desktop')}'
+        : form == 'cli'
+        ? 'cli · ${L10n.t('命令行/网页', 'CLI / Web')}'
+        : '${form ?? '?'}';
+    final authText = runtime['authEnabled'] == true
+        ? L10n.t('口令已启用', 'auth on')
+        : L10n.t('口令未启用', 'auth off');
+    final metrics = runtime['metrics'] as Map<String, dynamic>? ?? const {};
+    final services = d['services'] as Map<String, dynamic>? ?? const {};
+    final checks = d['checks'] as Map<String, dynamic>? ?? const {};
+    final notes = d['notes'] as List? ?? const [];
+    final plugin = d['plugin'] as Map<String, dynamic>? ?? const {};
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_diagTime.isNotEmpty)
+          Text(
+            '${L10n.t('检测完成 · ', 'Done · ')}$_diagTime',
+            style: DshType.xs13.copyWith(color: c.ink3),
+          ),
+        _diagSection(L10n.t('运行环境', 'Runtime'), [
+          _diagValueTile('${L10n.t('运行形态', 'Mode')} · $authText', formText),
+          _diagValueTile(
+            L10n.t('监听', 'Listen'),
+            '${runtime['host']}:${runtime['port']}',
+            inline: true,
+          ),
+          _diagValueTile(L10n.t('进程目录', 'CWD'), '${runtime['cwd']}'),
         ]),
-        _card(L10n.t('关于', 'About'), [
-          _row(
-            leading: const Icon(Icons.info_outline),
-            title: L10n.t('版本', 'Version'),
-            sub:
-                'App v${_appVersion.isEmpty ? '…' : _appVersion}'
-                ' · ${L10n.t('插件', 'plugin')} v${api.pluginVersion.isEmpty ? '…' : api.pluginVersion}',
-          ),
-          // v3.2.1：应用内更新入口——检测到新版后可直接覆盖安装（同签名，无需卸载）
-          _row(
-            leading: const Icon(Icons.system_update_alt),
-            title: L10n.t('检查更新', 'Check for updates'),
-            sub: L10n.t(
-              '有新版本会提示，可直接覆盖安装',
-              'Prompts on new versions; installs right over the current app',
-            ),
-            trailing: TextButton(
-              onPressed: () => checkUpdateInteractive(context),
-              child: Text(
-                L10n.t('检查 ▸', 'Check ▸'),
-                style: TextStyle(fontSize: 12, color: brand),
-              ),
-            ),
-          ),
-          _row(
-            leading: const Icon(Icons.monitor_heart_outlined),
-            title: L10n.t('环境诊断', 'Diagnostics'),
-            sub: _diagLoaded
-                ? '${L10n.t('检测完成 · ', 'Done · ')}$_diagTime'
-                : L10n.t('检测当前环境各项能力', 'Check environment capabilities'),
-            trailing: TextButton(
-              onPressed: _openDiag,
-              child: Text(
-                L10n.t('查看 ▸', 'View ▸'),
-                style: TextStyle(fontSize: 12, color: brand),
-              ),
+        if (metrics.isNotEmpty)
+          _diagSection(L10n.t('实时指标', 'Live metrics'), [
+            for (final e in metrics.entries)
+              _diagValueTile(_metricsName(e.key), '${e.value}', inline: true),
+          ]),
+        if (services.isNotEmpty)
+          _diagSection(L10n.t('服务', 'Services'), [
+            for (final e in services.entries)
+              _diagServiceTile(e.key, e.value == true),
+          ]),
+        if (checks.isNotEmpty)
+          _diagSection(L10n.t('端点实测', 'Endpoint checks'), [
+            for (final e in checks.entries) _diagCheckTile(e.key, e.value),
+          ]),
+        if (notes.isNotEmpty)
+          _diagSection(L10n.t('备注', 'Notes'), [
+            for (final n in notes)
+              DshTile(dense: true, title: '$n', maxTitleLines: 4),
+          ]),
+        if (plugin.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: DshSpace.md),
+            child: Text(
+              '${L10n.t('插件', 'Plugin')} ${plugin['name']} v${plugin['version']}',
+              style: DshType.xs13.copyWith(color: c.ink3),
             ),
           ),
-          _row(
-            leading: const Icon(Icons.article_outlined),
-            title: L10n.t('应用日志', 'App log'),
-            sub: L10n.t(
-              '启动/连接/加载事件（排障用）',
-              'Startup/connection/load events (troubleshooting)',
-            ),
-            trailing: TextButton(
-              onPressed: _openLog,
-              child: Text(
-                L10n.t('查看 ▸', 'View ▸'),
-                style: TextStyle(fontSize: 12, color: brand),
-              ),
-            ),
-          ),
-        ]),
       ],
     );
   }
@@ -1100,10 +1146,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(
-          L10n.t('悬浮球操作说明', 'Floating bubble guide'),
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-        ),
+        title: Text(L10n.t('悬浮球操作说明', 'Floating bubble guide')),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1126,7 +1169,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   L10n.t('未读通知数（60 秒后自动消退）', 'Unread count (clears after 60s)'),
                 ),
               ]),
-              const SizedBox(height: 10),
+              const SizedBox(height: DshSpace.md),
               _guideSection(L10n.t('手势', 'Gestures'), [
                 (
                   L10n.t('单击', 'Tap'),
@@ -1145,7 +1188,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   L10n.t('退出悬浮球', 'Exit the bubble'),
                 ),
               ]),
-              const SizedBox(height: 10),
+              const SizedBox(height: DshSpace.md),
               _guideSection(L10n.t('面板', 'Panel'), [
                 (
                   L10n.t('内容', 'Content'),
@@ -1163,9 +1206,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         actions: [
-          FilledButton(
+          DshButton(
+            label: L10n.t('知道了', 'Got it'),
+            size: DshButtonSize.sm,
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(L10n.t('知道了', 'Got it')),
           ),
         ],
       ),
@@ -1173,36 +1217,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _guideSection(String title, List<(String, String)> rows) {
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
+    final c = DshPalette.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: DshColors.brand(context),
-          ),
-        ),
-        const SizedBox(height: 4),
+        Text(title, style: DshType.xsStrong13.copyWith(color: c.ink3)),
+        const SizedBox(height: DshSpace.xs),
         for (final (k, v) in rows)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
+            padding: const EdgeInsets.only(bottom: DshSpace.xs),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '$k：',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: ink2,
-                  ),
+                SizedBox(
+                  width: 88,
+                  child: Text(k, style: DshType.xs13.copyWith(color: c.ink2)),
                 ),
                 Expanded(
-                  child: Text(v, style: TextStyle(fontSize: 13, color: ink3)),
+                  child: Text(v, style: DshType.xs13.copyWith(color: c.ink3)),
                 ),
               ],
             ),
@@ -1213,41 +1245,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// 选择界面语言（中文 / English），即时生效 + 持久化。
   Future<void> _pickLanguage(AppStore store) async {
-    final brand = DshColors.brand(context);
-    final choice = await showModalBottomSheet<String>(
+    final c = DshPalette.of(context);
+    final choice = await showDshSheet<String>(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      builder: (ctx) => DshSheet(
+        title: L10n.t('选择语言', 'Choose language'),
+        child: DshCardGroup(
+          margin: EdgeInsets.zero,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
-              child: Text(
-                L10n.t('选择语言', 'Choose language'),
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
             for (final (id, name) in [('zh', '中文'), ('en', 'English')])
-              ListTile(
-                title: Text(
-                  name,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: store.language == id
-                        ? FontWeight.w700
-                        : FontWeight.w400,
-                    color: store.language == id ? brand : null,
-                  ),
-                ),
+              DshTile(
+                dense: true,
+                title: name,
+                selected: store.language == id,
                 trailing: store.language == id
-                    ? Icon(Icons.check, size: 18, color: brand)
+                    ? Icon(Icons.check, size: 16, color: c.brand)
                     : null,
                 onTap: () => Navigator.of(ctx).pop(id),
               ),
-            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -1260,50 +1275,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final text = await AppLog.instance.readAll();
     if (!mounted) return;
     final msgr = ScaffoldMessenger.of(context);
-    showSheet(context, L10n.t('应用日志', 'App log'), [
-      Text(
-        '${L10n.t('最近 ', 'Last ')}${AppLog.instance.lines.length}${L10n.t(' 条 · 文件 dsh_mobile.log', ' entries · file dsh_mobile.log')}',
-        textAlign: TextAlign.center,
-        style: TextStyle(fontSize: 11, color: DshColors.ink3(context)),
-      ),
-      const SizedBox(height: 8),
-      ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 320),
-        child: SingleChildScrollView(
-          // v3.0.0：日志倒序展示——最新日志在最上面，不用每次翻到底部
-          child: SelectableText(
-            text.isEmpty ? L10n.t('（暂无日志）', '(No logs)') : _reverseLog(text),
-            style: TextStyle(
-              fontSize: 11.5,
-              height: 1.6,
-              color: DshColors.ink(context),
-              fontFamily: 'monospace',
+    final c = DshPalette.of(context);
+    await showDshSheet<void>(
+      context: context,
+      builder: (ctx) => DshSheet(
+        title: L10n.t('应用日志', 'App log'),
+        actions: Row(
+          children: [
+            Expanded(
+              child: DshButton(
+                label: L10n.t('清空', 'Clear'),
+                size: DshButtonSize.sm,
+                variant: DshButtonVariant.danger,
+                onPressed: () async {
+                  await AppLog.instance.clear();
+                  showToastAt(msgr, L10n.t('日志已清空', 'Log cleared'));
+                },
+              ),
             ),
-          ),
+            const SizedBox(width: DshSpace.sm),
+            Expanded(
+              child: DshButton(
+                label: L10n.t('复制', 'Copy'),
+                icon: Icons.content_copy_outlined,
+                size: DshButtonSize.sm,
+                variant: DshButtonVariant.outline,
+                onPressed: () => _copy(text),
+              ),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '${L10n.t('最近 ', 'Last ')}${AppLog.instance.lines.length}${L10n.t(' 条 · 文件 dsh_mobile.log', ' entries · file dsh_mobile.log')}',
+              style: DshType.xs13.copyWith(color: c.ink3),
+            ),
+            const SizedBox(height: DshSpace.sm),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: SingleChildScrollView(
+                // v3.0.0：日志倒序展示——最新日志在最上面，不用每次翻到底部
+                child: SelectableText(
+                  text.isEmpty ? L10n.t('（暂无日志）', '(No logs)') : _reverseLog(text),
+                  style: DshType.mdCodeSmall.copyWith(color: c.ink),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
-      const SizedBox(height: 12),
-      Row(
-        children: [
-          Expanded(
-            child: OutlinedButton(
-              onPressed: () async {
-                await AppLog.instance.clear();
-                showToastAt(msgr, L10n.t('日志已清空', 'Log cleared'));
-              },
-              child: Text(L10n.t('清空', 'Clear')),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: FilledButton(
-              onPressed: () => _copy(text),
-              child: Text(L10n.t('复制', 'Copy')),
-            ),
-          ),
-        ],
-      ),
-    ]);
+    );
   }
 
   /// v3.0.0：日志倒序展示（最新在上，省去翻到底部）——逐行倒排，丢弃尾部空行。
@@ -1317,26 +1340,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _loadDiag();
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
-    showSheet(context, L10n.t('环境诊断', 'Diagnostics'), [
-      ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 320),
-        child: SingleChildScrollView(
-          child: SelectableText(
-            _diagText,
-            style: TextStyle(
-              fontSize: 13,
-              height: 1.7,
-              color: DshColors.ink(context),
-            ),
-          ),
+    await showDshSheet<void>(
+      context: context,
+      builder: (ctx) => DshSheet(
+        title: L10n.t('环境诊断', 'Diagnostics'),
+        actions: DshButton(
+          label: L10n.t('复制诊断信息', 'Copy diagnostics'),
+          icon: Icons.content_copy_outlined,
+          size: DshButtonSize.sm,
+          variant: DshButtonVariant.outline,
+          expanded: true,
+          onPressed: () => _copy(_diagText),
         ),
+        child: _diagContent(),
       ),
-      const SizedBox(height: 12),
-      FilledButton(
-        onPressed: () => _copy(_diagText),
-        child: Text(L10n.t('复制', 'Copy')),
-      ),
-    ]);
+    );
   }
 
   Future<void> _copy(String text) async {

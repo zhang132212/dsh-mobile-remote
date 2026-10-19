@@ -1,9 +1,15 @@
+// 内核问询卡（question/requested）——官方 Harness QuestionComposer 的手机版。
+//
+// v3.3.0（官方风格）：整卡用 DshCard（R20 + 发丝边，不再自绘投影）承载，
+// 标题 sStrong14·ink、说明 xs13·ink3；选项行换 DshTile（选中态 navActive 底）
+// 配左侧 DshStatusDot；按钮全部走 DshButton；自定义输入交给主题 inputDecorationTheme。
 import 'package:flutter/material.dart';
+import '../dsh_kit.dart';
 import '../l10n.dart';
 import '../models.dart';
 import '../theme.dart';
 
-/// Mobile adaptation of the official Harness QuestionComposer.
+/// 官方 Harness QuestionComposer 的手机端适配：逐题作答 + 自定义输入。
 class HarnessQuestionCard extends StatefulWidget {
   final QuestionRequest request;
   final VoidCallback onCancel;
@@ -101,100 +107,206 @@ class HarnessQuestionCardState extends State<HarnessQuestionCard> {
 
   @override
   Widget build(BuildContext context) {
+    final c = DshPalette.of(context);
     final questions = widget.request.questions;
     final q = questions.isEmpty ? null : questions[_page];
-    final ink2 = DshColors.ink2(context);
-    final line = DshColors.line(context);
     final media = MediaQuery.of(context);
     final height = ((media.size.height - media.viewInsets.bottom) * 0.55).clamp(180.0, 520.0);
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+    return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: height),
-      decoration: BoxDecoration(
-        color: DshColors.surface(context),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: line),
-        boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 12, offset: Offset(0, 3))],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 8, 0),
-            child: Row(children: [
-              Expanded(child: Text(q?.header ?? L10n.t('需要你决定', 'Your input needed'),
-                style: TextStyle(fontSize: 11, height: 1.45, color: ink2))),
-              IconButton(
-                tooltip: L10n.t('取消', 'Cancel'),
-                onPressed: _submitting ? null : widget.onCancel,
-                icon: const Icon(Icons.close, size: 18),
+      // 官方卡片：R20 + layer2 填充 + 0.5px 发丝边，不叠投影
+      child: DshCard(
+        margin: const EdgeInsets.fromLTRB(DshSpace.md, 0, DshSpace.md, DshSpace.sm),
+        padding: EdgeInsets.zero,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 标题行：问询 header（sStrong14 · ink）+ 取消
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                DshSpace.xl,
+                DshSpace.md,
+                DshSpace.sm,
+                0,
               ),
-            ]),
-          ),
-          Flexible(
-            child: SingleChildScrollView(
-              key: ValueKey('question-page-$_page'),
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                if (q != null) ...[
-                  Text(q.question, style: const TextStyle(fontSize: 16, height: 1.375, fontWeight: FontWeight.w500)),
-                  if (q.detail?.isNotEmpty == true) ...[
-                    const SizedBox(height: 8),
-                    Text(q.detail!, style: TextStyle(fontSize: 13, height: 1.5, color: ink2)),
-                  ],
-                  const SizedBox(height: 12),
-                  for (final o in q.options)
-                    _OptionTile(label: o.label, description: o.description, multi: q.multiSelect,
-                      selected: _selected[q.id]!.contains(o.label),
-                      onTap: () { if (!_submitting) _toggle(q, o.label); }),
-                  const SizedBox(height: 10),
-                  TextField(
-                    enabled: !_submitting,
-                    controller: _ctrls[q.id],
-                    onChanged: (v) => _onCustom(q, v),
-                    minLines: 1,
-                    maxLines: 3,
-                    style: const TextStyle(fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText: q.multiSelect ? L10n.t('补充说明（可选）…', 'Add details (optional)…')
-                        : L10n.t('或输入其他答案…', 'Or type another answer…'),
-                      isDense: true,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      q?.header ?? L10n.t('需要你决定', 'Your input needed'),
+                      style: DshType.sStrong14.copyWith(color: c.ink),
                     ),
                   ),
-                ] else Text(L10n.t('问题内容为空，请取消后重试', 'No questions received. Cancel and retry.')),
-                if (_hint != null) Padding(padding: const EdgeInsets.only(top: 8),
-                  child: Text(_hint!, style: TextStyle(fontSize: 12, color: DshColors.danger(context)))),
-                const SizedBox(height: 8),
-              ]),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 16, 10),
-            child: Row(children: [
-              if (questions.length > 1) ...[
-                IconButton(tooltip: L10n.t('上一题', 'Previous question'),
-                  onPressed: _submitting || _page == 0 ? null : () => setState(() { _page--; _hint = null; }),
-                  icon: const Icon(Icons.chevron_left, size: 20)),
-                Text('${_page + 1} / ${questions.length}', style: TextStyle(fontSize: 12, color: ink2)),
-              ],
-              const Spacer(),
-              TextButton(onPressed: _submitting ? null : widget.onCancel, child: Text(L10n.t('取消', 'Cancel'))),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: _submitting || q == null ? null : _page < questions.length - 1
-                  ? () => setState(() { _page++; _hint = null; }) : _submit,
-                child: Text(_submitting ? L10n.t('提交中…', 'Submitting…') : _page < questions.length - 1
-                  ? L10n.t('下一题', 'Next') : L10n.t('提交', 'Submit')),
+                  DshIconButton(
+                    icon: Icons.close,
+                    iconSize: 18,
+                    tooltip: L10n.t('取消', 'Cancel'),
+                    onTap: _submitting ? null : widget.onCancel,
+                  ),
+                ],
               ),
-            ]),
-          ),
-        ],
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                key: ValueKey('question-page-$_page'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (q != null) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          DshSpace.xl,
+                          DshSpace.xs,
+                          DshSpace.xl,
+                          0,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              q.question,
+                              style: DshType.baseStrong16.copyWith(color: c.ink),
+                            ),
+                            if (q.detail?.isNotEmpty == true) ...[
+                              const SizedBox(height: DshSpace.sm),
+                              Text(
+                                q.detail!,
+                                style: DshType.xs13.copyWith(color: c.ink3),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: DshSpace.sm),
+                      // 选项行整行铺满卡片，选中态用 navActive 底（DshTile 自带）
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: DshSpace.sm),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (final o in q.options)
+                              _OptionTile(
+                                label: o.label,
+                                description: o.description,
+                                multi: q.multiSelect,
+                                selected: _selected[q.id]!.contains(o.label),
+                                onTap: () {
+                                  if (!_submitting) _toggle(q, o.label);
+                                },
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: DshSpace.md),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: DshSpace.xl),
+                        child: TextField(
+                          enabled: !_submitting,
+                          controller: _ctrls[q.id],
+                          onChanged: (v) => _onCustom(q, v),
+                          minLines: 1,
+                          maxLines: 3,
+                          style: DshType.s14.copyWith(color: c.ink),
+                          // 边框/内衬/焦点态一律取主题 inputDecorationTheme
+                          decoration: InputDecoration(
+                            hintText: q.multiSelect
+                                ? L10n.t('补充说明（可选）…', 'Add details (optional)…')
+                                : L10n.t('或输入其他答案…', 'Or type another answer…'),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ] else
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: DshSpace.xl),
+                        child: Text(
+                          L10n.t('问题内容为空，请取消后重试', 'No questions received. Cancel and retry.'),
+                          style: DshType.s14.copyWith(color: c.ink2),
+                        ),
+                      ),
+                    if (_hint != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          DshSpace.xl,
+                          DshSpace.md,
+                          DshSpace.xl,
+                          0,
+                        ),
+                        child: Text(
+                          _hint!,
+                          style: DshType.xs13.copyWith(color: c.danger),
+                        ),
+                      ),
+                    const SizedBox(height: DshSpace.md),
+                  ],
+                ),
+              ),
+            ),
+            const DshDivider(),
+            // 底栏：翻页 + 取消/下一步（primary）
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                DshSpace.md,
+                DshSpace.sm,
+                DshSpace.md,
+                DshSpace.md,
+              ),
+              child: Row(
+                children: [
+                  if (questions.length > 1) ...[
+                    DshIconButton(
+                      icon: Icons.chevron_left,
+                      tooltip: L10n.t('上一题', 'Previous question'),
+                      onTap: _submitting || _page == 0
+                          ? null
+                          : () => setState(() {
+                                _page--;
+                                _hint = null;
+                              }),
+                    ),
+                    const SizedBox(width: DshSpace.xs),
+                    Text(
+                      '${_page + 1} / ${questions.length}',
+                      style: DshType.xxs12.copyWith(color: c.ink3),
+                    ),
+                  ],
+                  const Spacer(),
+                  DshButton(
+                    label: L10n.t('取消', 'Cancel'),
+                    variant: DshButtonVariant.outline,
+                    onPressed: _submitting ? null : widget.onCancel,
+                  ),
+                  const SizedBox(width: DshSpace.sm),
+                  DshButton(
+                    label: _submitting
+                        ? L10n.t('提交中…', 'Submitting…')
+                        : _page < questions.length - 1
+                            ? L10n.t('下一题', 'Next')
+                            : L10n.t('提交', 'Submit'),
+                    variant: DshButtonVariant.primary,
+                    loading: _submitting,
+                    onPressed: _submitting || q == null
+                        ? null
+                        : _page < questions.length - 1
+                            ? () => setState(() {
+                                  _page++;
+                                  _hint = null;
+                                })
+                            : _submit,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
+/// 单个选项行：DshTile（选中 navActive 底）+ 左侧状态圆点；多选额外给一个勾选框提示。
 class _OptionTile extends StatelessWidget {
   final String label;
   final String? description;
@@ -211,44 +323,26 @@ class _OptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final brand = DshColors.brand(context);
-    final ink3 = DshColors.ink3(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              multi
-                  ? (selected ? Icons.check_box : Icons.check_box_outline_blank)
-                  : (selected ? Icons.radio_button_checked : Icons.radio_button_unchecked),
-              size: 18,
-              color: brand,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(fontSize: 13.5, fontWeight: selected ? FontWeight.w600 : FontWeight.w500),
-                  ),
-                  if (description != null && description!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 1),
-                      child: Text(description!, style: TextStyle(fontSize: 11.5, color: ink3, height: 1.35)),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
+    final c = DshPalette.of(context);
+    final desc = description;
+    return DshTile(
+      selected: selected,
+      leading: DshStatusDot(color: selected ? c.business : c.idle),
+      titleWidget: Text(
+        label,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: (selected ? DshType.sStrong14 : DshType.s14).copyWith(color: c.ink),
       ),
+      subtitle: (desc != null && desc.isNotEmpty) ? desc : null,
+      trailing: multi
+          ? Icon(
+              selected ? Icons.check_box : Icons.check_box_outline_blank,
+              size: 18,
+              color: selected ? c.ink : c.ink3,
+            )
+          : null,
+      onTap: onTap,
     );
   }
 }
-

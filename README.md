@@ -4,6 +4,8 @@
 
 ## 截图
 
+> App 界面已按**官方 DeepSeek Harness Web 客户端**的设计令牌整体重构（配色/圆角/字体/发丝描边/高度全部同源，见 [docs/10-ui-design-system.md](docs/10-ui-design-system.md)）。下表为重构前的真机截图，新版走查图见下方「界面走查」。
+
 | 首页 | 对话 | 通知 |
 |---|---|---|
 | ![首页](docs/screenshots/01-home.png) | ![对话](docs/screenshots/04-chat.png) | ![通知](docs/screenshots/02-notifications.png) |
@@ -15,6 +17,32 @@
 | 外出访问：蒲公英 App（移动端） | 蒲公英 PC 客户端 | 应用商店搜索 |
 |---|---|---|
 | ![蒲公英移动端](docs/screenshots/pgy-mobile-app.jpg) | ![蒲公英PC客户端](docs/screenshots/pgy-pc-client.jpg) | ![应用商店搜索](docs/screenshots/pgy-appstore.jpg) |
+
+### 界面走查（重构后）
+
+无需真机与模拟器，直接由真实组件渲染出图（`flutter test --update-goldens test/ui_gallery_test.dart test/ui_pages_gallery_test.dart`，产物在 `dsh-mobile-app/test/goldens/`）：
+
+| 首页 | 会话列表 |
+|---|---|
+| ![首页浅色](docs/screenshots/ui-page-home-light.png) | ![会话浅色](docs/screenshots/ui-page-sessions-light.png) |
+
+| 设置 | 通知 |
+|---|---|
+| ![设置浅色](docs/screenshots/ui-page-settings-light.png) | ![通知浅色](docs/screenshots/ui-page-notifications-light.png) |
+
+设计令牌与基础组件（浅色 / 深色）—— 完整令牌表与字体阶梯：
+
+| 令牌与组件（浅色） | 令牌与组件（深色） |
+|---|---|
+| ![令牌浅色](docs/screenshots/ui-tokens-light.png) | ![令牌深色](docs/screenshots/ui-tokens-dark.png) |
+
+对话版式（浅色 / 深色）—— 气泡、工具卡、composer、空状态：
+
+| 对话版式（浅色） | 对话版式（深色） |
+|---|---|
+| ![对话浅色](docs/screenshots/ui-chat-light.png) | ![对话深色](docs/screenshots/ui-chat-dark.png) |
+
+各页面的深色版本见 `docs/screenshots/ui-page-*-dark.png`。
 
 ## 功能
 
@@ -240,6 +268,7 @@ pushUrls:
 - `docs/01-PRD.md` ~ `docs/07-user-manual.md` — 需求/架构/API/安全/测试/部署/手册
 - `docs/08-扩展开发指南.md` — **二次开发：动作区、自定义推送、页面/App 定制、分享你的版本**
 - `docs/09-compatibility.md` — **兼容性：内核耦合点、降级行为、多品牌/苹果端、已知问题、签名**
+- `docs/10-ui-design-system.md` — **界面设计系统：令牌来源、三层结构、硬性规矩、golden 走查与二次开发**
 
 ## 开发
 
@@ -247,8 +276,11 @@ pushUrls:
 lib/index.js    服务端：路由、认证、事件桥、catalog、会话、通知、动作、推送、默认配置
 lib/client.js   桌面 GUI 客户端模块（设置页「连接移动端设备」）
 dsh-mobile-app/ Flutter 原生 App（扫码连接 + 全部移动界面）
+  theme.dart      设计令牌（与官方 DSH Web 客户端同源）
+  dsh_kit.dart    基础组件库（按钮/卡片/列表行/弹层/空态…）
+  UI_STYLE_GUIDE.md  样式契约：令牌表、圆角选档、字体阶梯、组件清单
 tools/          验证脚本（e2e-check / phase1-check / push-test）
-prototype/      界面原型（v7 定稿，设计参考）
+prototype/      早期界面原型（v7，重构前的设计参考；现行视觉以 docs/10 与 UI_STYLE_GUIDE 为准）
 ```
 
 ## 许可

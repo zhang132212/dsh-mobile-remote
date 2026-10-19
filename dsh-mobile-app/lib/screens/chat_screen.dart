@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../toast.dart';
 import '../api.dart';
 import '../chat_copy.dart';
+import '../dsh_kit.dart';
 import '../logger.dart';
 import '../l10n.dart';
 import '../models.dart';
@@ -663,6 +664,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// 统一单一方向（不再按条数切换 reverse）：根治 50/51 条边界翻转导致滚动位置跳变
   /// （review P1-1）；无限模式上翻加载更早时新数据出现在视觉顶部，阅读位置不跳动。
   Widget _buildLiveView() {
+    final c = DshPalette.of(context);
     final hasDraft = _streaming || _draft.isNotEmpty;
     final topButton = !_infiniteMode && _earliestSeq > 0;
     final loadingTail = _infiniteMode && _loadingMore && _earliestSeq > 0;
@@ -682,7 +684,8 @@ class _ChatScreenState extends State<ChatScreen> {
           center: _liveCenterKey,
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              // 聊天内容左右边距走官方 chatH(12)，不再各写 16
+              padding: const EdgeInsets.fromLTRB(DshSpace.chatH, DshSpace.md, DshSpace.chatH, 0),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) => _buildItem(_olderItems[index]),
@@ -692,16 +695,22 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             const SliverToBoxAdapter(key: _liveCenterKey, child: SizedBox.shrink()),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+              padding: const EdgeInsets.fromLTRB(DshSpace.chatH, 0, DshSpace.chatH, DshSpace.sm),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
                     // center 之后：加载条/按钮 → 当前窗口消息（最旧→最新）→ 草稿。
                     if ((topButton || loadingTail) && index == 0) {
                       if (topButton) return _OlderButton(busy: _loadingMore, onTap: _openHistory);
-                      return const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 10),
-                        child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),),
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: DshSpace.md),
+                        child: Center(
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: c.ink3),
+                          ),
+                        ),
                       );
                     }
                     final dataIndex = index - (topButton || loadingTail ? 1 : 0);
@@ -721,48 +730,59 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// 历史分段浏览：普通列表（最旧在顶部，offset 0 安全），顶部翻页控制条。
   Widget _buildHistoryView() {
-    final ink2 = DshColors.ink2(context);
+    final c = DshPalette.of(context);
     return Column(
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: DshSpace.md, vertical: DshSpace.sm),
           decoration: BoxDecoration(
-            color: DshColors.surface(context),
-            border: Border(bottom: BorderSide(color: DshColors.line(context))),
+            color: c.bg,
+            border: Border(bottom: DshStroke.divider(c.line2)),
           ),
           child: Row(
             children: [
-              TextButton.icon(
+              DshButton(
+                label: L10n.t('更早', 'Older'),
+                icon: Icons.arrow_upward,
+                variant: DshButtonVariant.outline,
+                size: DshButtonSize.sm,
                 onPressed: _histHasOlder && !_loadingMore ? _histOlder : null,
-                icon: const Icon(Icons.arrow_upward, size: 15),
-                label: Text(L10n.t('更早', 'Older'), style: TextStyle(fontSize: 12)),
               ),
-              TextButton.icon(
+              const SizedBox(width: DshSpace.sm),
+              DshButton(
+                label: L10n.t('更新', 'Newer'),
+                icon: Icons.arrow_downward,
+                variant: DshButtonVariant.outline,
+                size: DshButtonSize.sm,
                 onPressed: _histHasNewer && !_loadingMore ? _histNewer : null,
-                icon: const Icon(Icons.arrow_downward, size: 15),
-                label: Text(L10n.t('更新', 'Newer'), style: TextStyle(fontSize: 12)),
               ),
               const Spacer(),
-              TextButton.icon(
+              // 「回到最新」是这一段视图的主操作：有新消息时升级为 primary 强调
+              DshButton(
+                label: _pendingNew
+                    ? L10n.t('回到最新 · 有新消息', 'Back to latest · New messages')
+                    : L10n.t('回到最新', 'Back to latest'),
+                icon: Icons.subdirectory_arrow_right,
+                variant: _pendingNew ? DshButtonVariant.primary : DshButtonVariant.ghost,
+                size: DshButtonSize.sm,
                 onPressed: _backToLive,
-                icon: const Icon(Icons.subdirectory_arrow_right, size: 15),
-                label: Text(
-                  _pendingNew
-                      ? L10n.t('回到最新 · 有新消息', 'Back to latest · New messages')
-                      : L10n.t('回到最新', 'Back to latest'),
-                  style: TextStyle(fontSize: 12, color: _pendingNew ? DshColors.brand(context) : ink2),
-                ),
               ),
             ],
           ),
         ),
         Expanded(
           child: _histItems.isEmpty
-              ? Center(child: Text(L10n.t(_historyDegraded ? '更早历史不可恢复' : '没有更早的消息', _historyDegraded ? 'Earlier history unavailable' : 'No earlier messages')))
+              ? DshEmpty(
+                  icon: Icons.history,
+                  title: L10n.t(_historyDegraded ? '更早历史不可恢复' : '没有更早的消息',
+                      _historyDegraded ? 'Earlier history unavailable' : 'No earlier messages'),
+                  compact: true,
+                )
               : SelectionArea(
                   child: ListView.builder(
                     controller: _scrollCtrl,
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                    padding: const EdgeInsets.fromLTRB(
+                        DshSpace.chatH, DshSpace.md, DshSpace.chatH, DshSpace.sm),
                     itemCount: _histItems.length,
                     itemBuilder: (context, index) => _buildItem(_histItems[index]),
                   ),
@@ -1196,8 +1216,19 @@ class _ChatScreenState extends State<ChatScreen> {
       builder: (ctx) => AlertDialog(
         title: Text(L10n.t('删除这条排队消息？', 'Remove this queued message?')),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text(L10n.t('取消', 'Cancel'))),
-          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: Text(L10n.t('删除', 'Remove'))),
+          DshButton(
+            label: L10n.t('取消', 'Cancel'),
+            variant: DshButtonVariant.outline,
+            size: DshButtonSize.sm,
+            onPressed: () => Navigator.of(ctx).pop(false),
+          ),
+          const SizedBox(width: DshSpace.sm),
+          DshButton(
+            label: L10n.t('删除', 'Remove'),
+            variant: DshButtonVariant.danger,
+            size: DshButtonSize.sm,
+            onPressed: () => Navigator.of(ctx).pop(true),
+          ),
         ],
       ),
     );
@@ -1285,141 +1316,203 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildQueueDock() {
+    final c = DshPalette.of(context);
     // v2.7.2：只显示可操作的 queued 行（对齐 PC 端 QueueDock）；
     // steering/context（插话中/上下文注入）不可操作,不显示
     final rows = _queue.where((r) => r['placement'] == 'queued').toList();
     if (rows.isEmpty) return const SizedBox.shrink();
     final collapsed = _queueCollapsed && rows.length > 1;
     final visible = collapsed ? rows.take(1).toList() : rows;
-    final ink3 = DshColors.ink3(context);
-    // v2.7.2：独立于输入框的轻量条——无背景块、不与消息/输入框挤压，
+    // v2.7.2：独立于输入框的轻量条——官方卡片语言（R16 + 发丝边 + layer2），
     // 多条时标题行可点击折叠；单条直接显示内容行
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (rows.length > 1)
-            InkWell(
-              onTap: () => setState(() => _queueCollapsed = !_queueCollapsed),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Row(
+      padding: const EdgeInsets.fromLTRB(DshSpace.chatH, DshSpace.xs, DshSpace.chatH, 0),
+      child: DshCard(
+        radius: DshRadius.lg,
+        padding: EdgeInsets.zero,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (rows.length > 1)
+              InkWell(
+                onTap: () => setState(() => _queueCollapsed = !_queueCollapsed),
+                borderRadius: BorderRadius.circular(DshRadius.lg),
+                splashFactory: NoSplash.splashFactory,
+                highlightColor: c.hover,
+                hoverColor: c.hover,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: DshSpace.md,
+                    vertical: DshSpace.sm,
+                  ),
+                  child: Row(
+                    children: [
+                      // v2.7.2：图标统一灰色系（与模型/权限 pill 同风格，去蓝色）
+                      Icon(Icons.schedule_send, size: 16, color: c.ink3),
+                      const SizedBox(width: DshSpace.sm),
+                      Expanded(
+                        child: Text(
+                          L10n.t('${rows.length} 条排队消息', '${rows.length} queued'),
+                          style: DshType.xsStrong13.copyWith(color: c.ink3),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      AnimatedRotation(
+                        turns: _queueCollapsed ? 0 : 0.5,
+                        duration: DshMotion.normal,
+                        curve: DshMotion.standard,
+                        child: Icon(Icons.keyboard_arrow_down, size: 16, color: c.ink3),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (rows.length > 1 && !_queueCollapsed) DshDivider(indent: DshSpace.md, endIndent: DshSpace.md),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 160),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(DshSpace.xs),
+                child: Column(
                   mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // v2.7.2：图标统一灰色系（与模型/权限 pill 同风格，去蓝色）
-                    Icon(Icons.schedule_send, size: 13, color: ink3),
-                    const SizedBox(width: 5),
-                    Text(
-                      L10n.t('${rows.length} 条排队消息', '${rows.length} queued'),
-                      style: TextStyle(fontSize: 11.5, color: ink3, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(width: 3),
-                    Icon(_queueCollapsed ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up, size: 15, color: ink3),
-                  ],
+                  children: [for (final row in visible) _buildQueueRow(row)],
                 ),
               ),
             ),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 160),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [for (final row in visible) _buildQueueRow(row)],
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildQueueRow(Map<String, dynamic> row) {
+    final c = DshPalette.of(context);
     final id = row['id'] as String? ?? '';
     final rawText = row['text'] as String? ?? '';
     // v2.7.2 review：steering 行（next-step）不可插话；非文本消息显示占位、不可编辑但可删除
     final steerable = row['placement'] != 'steering';
     final hasText = rawText.isNotEmpty;
     final text = hasText ? rawText : L10n.t('(非文本消息)', '(non-text message)');
-    final ink3 = DshColors.ink3(context);
-    final brand = DshColors.brand(context);
     final editing = _editingQueueId == id;
     if (editing) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.symmetric(vertical: DshSpace.xs),
         child: Row(
           children: [
             Expanded(
               child: TextField(
                 controller: _queueEditCtrl,
-                style: const TextStyle(fontSize: 13),
-                decoration: const InputDecoration(isDense: true, border: InputBorder.none),
+                style: DshType.xs13.copyWith(color: c.ink),
+                decoration: InputDecoration(
+                  isDense: true,
+                  filled: true,
+                  fillColor: c.input,
+                  hintStyle: DshType.xs13.copyWith(color: c.caption),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: DshSpace.sm,
+                    vertical: DshSpace.sm,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: DshRadius.rSm,
+                    borderSide: DshStroke.side(c.line4),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: DshRadius.rSm,
+                    borderSide: DshStroke.side(c.line4),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: DshRadius.rSm,
+                    borderSide: DshStroke.side(c.ink3),
+                  ),
+                ),
                 onSubmitted: (_) => _queueEdit(id),
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.check, size: 17),
-              color: brand,
-              visualDensity: VisualDensity.compact,
-              onPressed: _queueBusy ? null : () => _queueEdit(id),
+            DshIconButton(
+              icon: Icons.check,
+              size: DshSpace.controlSm,
+              iconSize: 16,
+              color: c.business,
+              tooltip: L10n.t('保存', 'Save'),
+              onTap: _queueBusy ? null : () => _queueEdit(id),
             ),
-            IconButton(
-              icon: const Icon(Icons.close, size: 17),
-              color: ink3,
-              visualDensity: VisualDensity.compact,
-              onPressed: () => setState(() => _editingQueueId = null),
+            DshIconButton(
+              icon: Icons.close,
+              size: DshSpace.controlSm,
+              iconSize: 16,
+              color: c.ink3,
+              tooltip: L10n.t('取消', 'Cancel'),
+              onTap: () => setState(() => _editingQueueId = null),
             ),
           ],
         ),
       );
     }
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          // v2.7.2：图标统一灰色系、尺寸缩小（与模型/权限 pill 同风格，去蓝色）
-          Icon(Icons.schedule_send, size: 13, color: ink3),
-          const SizedBox(width: 5),
-          Expanded(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, fontStyle: hasText ? FontStyle.normal : FontStyle.italic, color: hasText ? null : ink3),
-            ),
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(DshRadius.md),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(DshRadius.md),
+        splashFactory: NoSplash.splashFactory,
+        highlightColor: c.hover,
+        hoverColor: c.hover,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DshSpace.sm,
+            vertical: DshSpace.xs,
           ),
-          if (hasText)
-            IconButton(
-              icon: const Icon(Icons.edit_outlined, size: 15),
-              color: ink3,
-              visualDensity: VisualDensity.compact,
-              tooltip: L10n.t('编辑', 'Edit'),
-              // v2.7.2 review：操作忙碌锁——连点/并发操作期间禁用按钮
-              onPressed: _queueBusy
-                  ? null
-                  : () {
-                      _queueEditCtrl.text = rawText;
-                      setState(() => _editingQueueId = id);
-                    },
-            ),
-          if (steerable)
-            IconButton(
-              // v2.8.0：插队图标 = 向上小箭头（语义=插到 agent 下一步执行，区别于发送的向上箭头尺寸更小）
-              icon: const Icon(Icons.arrow_upward, size: 15),
-              color: ink3,
-              visualDensity: VisualDensity.compact,
-              tooltip: L10n.t('插话', 'Steer'),
-              onPressed: _queueBusy ? null : () => _queueSteer(id),
-            ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline, size: 15),
-            color: ink3,
-            visualDensity: VisualDensity.compact,
-            tooltip: L10n.t('删除', 'Remove'),
-            onPressed: _queueBusy ? null : () => _queueRemove(id),
+          child: Row(
+            children: [
+              // v2.7.2：图标统一灰色系、尺寸缩小（与模型/权限 pill 同风格，去蓝色）
+              Icon(Icons.schedule_send, size: 16, color: c.ink3),
+              const SizedBox(width: DshSpace.sm),
+              Expanded(
+                child: Text(
+                  text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: DshType.xs13.copyWith(
+                    color: hasText ? c.ink : c.ink3,
+                    fontStyle: hasText ? FontStyle.normal : FontStyle.italic,
+                  ),
+                ),
+              ),
+              if (hasText)
+                DshIconButton(
+                  icon: Icons.edit_outlined,
+                  size: DshSpace.controlSm,
+                  iconSize: 16,
+                  color: c.ink3,
+                  tooltip: L10n.t('编辑', 'Edit'),
+                  // v2.7.2 review：操作忙碌锁——连点/并发操作期间禁用按钮
+                  onTap: _queueBusy
+                      ? null
+                      : () {
+                          _queueEditCtrl.text = rawText;
+                          setState(() => _editingQueueId = id);
+                        },
+                ),
+              if (steerable)
+                DshIconButton(
+                  // v2.8.0：插队图标 = 向上小箭头（语义=插到 agent 下一步执行，区别于发送的向上箭头尺寸更小）
+                  icon: Icons.arrow_upward,
+                  size: DshSpace.controlSm,
+                  iconSize: 16,
+                  color: c.ink3,
+                  tooltip: L10n.t('插话', 'Steer'),
+                  onTap: _queueBusy ? null : () => _queueSteer(id),
+                ),
+              DshIconButton(
+                icon: Icons.delete_outline,
+                size: DshSpace.controlSm,
+                iconSize: 16,
+                color: c.ink3,
+                tooltip: L10n.t('删除', 'Remove'),
+                onTap: _queueBusy ? null : () => _queueRemove(id),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -2170,54 +2263,71 @@ class _ChatScreenState extends State<ChatScreen> {
   // ── UI ──
   @override
   Widget build(BuildContext context) {
+    final c = DshPalette.of(context);
     final store = widget.store;
-    final ink3 = DshColors.ink3(context);
-    final brand = DshColors.brand(context);
-    final surface = DshColors.surface(context);
 
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Row(
-          children: [
-            Flexible(
-              child: Text(_title ?? L10n.t('会话', 'Session'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-            ),
-            const SizedBox(width: 8),
-            _StatusDot(status: store.connState == 'connected' ? _pageAgentStatus : 'offline'),
-          ],
+    return DshPage(
+      // 官方标题栏：52 高、透明底、底部发丝线，标题 16/24 · 500
+      appBar: DshAppBar(
+        title: _title ?? L10n.t('会话', 'Session'),
+        leading: DshIconButton(
+          icon: Icons.arrow_back_ios_new,
+          iconSize: 18,
+          tooltip: L10n.t('返回', 'Back'),
+          onTap: () => Navigator.of(context).pop(),
         ),
         actions: [
-          // v2.7：会话工具（任务 / 子代理 / 目标）
-          IconButton(
-            icon: const Icon(Icons.assignment_outlined, size: 20),
-            tooltip: L10n.t('任务 / 子代理 / 目标', 'Tasks / Subagents / Goals'),
-            onPressed: () {
-              final sid = _mySessionId;
-              if (sid != null) showSessionToolsSheet(context, widget.store, sid, onTitleChanged: widget.onTitleChanged);
-            },
-          ),
-          // v3.1.5（issue #15）：会话级复制入口（范围=当前已加载的消息，见 _conversationText）
-          IconButton(
-            icon: const Icon(Icons.copy_all, size: 20),
-            tooltip: L10n.t('复制当前已加载的对话', 'Copy loaded conversation'),
-            onPressed: _copyConversation,
+          Padding(
+            padding: const EdgeInsets.only(right: DshSpace.sm),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 连接/会话状态点（原本跟在标题后，官方标题栏由右侧动作区承载）
+                _StatusDot(status: store.connState == 'connected' ? _pageAgentStatus : 'offline'),
+                const SizedBox(width: DshSpace.md),
+                // v2.7：会话工具（任务 / 子代理 / 目标）
+                DshIconButton(
+                  icon: Icons.assignment_outlined,
+                  tooltip: L10n.t('任务 / 子代理 / 目标', 'Tasks / Subagents / Goals'),
+                  onTap: () {
+                    final sid = _mySessionId;
+                    if (sid != null) showSessionToolsSheet(context, widget.store, sid, onTitleChanged: widget.onTitleChanged);
+                  },
+                ),
+                const SizedBox(width: DshSpace.xs),
+                // v3.1.5（issue #15）：会话级复制入口（范围=当前已加载的消息，见 _conversationText）
+                DshIconButton(
+                  icon: Icons.copy_all,
+                  tooltip: L10n.t('复制当前已加载的对话', 'Copy loaded conversation'),
+                  onTap: _copyConversation,
+                ),
+              ],
+            ),
           ),
         ],
       ),
-      body: Column(
+      child: Column(
         children: [
-          // 用量条
+          // 用量统计条：紧凑 R8 控件（官方统计类控件不升圆角），module 底承载
           if (_usageLoaded && _usage.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
-              child: Text(
-                _fmtUsage(_usage),
-                style: TextStyle(fontSize: 11.5, color: ink3),
+              padding: const EdgeInsets.fromLTRB(DshSpace.chatH, DshSpace.xs, DshSpace.chatH, DshSpace.xs),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: DshSpace.sm,
+                    vertical: DshSpace.xxs,
+                  ),
+                  decoration: BoxDecoration(
+                    color: c.module,
+                    borderRadius: BorderRadius.circular(DshRadius.sm),
+                  ),
+                  child: Text(
+                    _fmtUsage(_usage),
+                    style: DshType.xxs12.copyWith(color: c.ink3),
+                  ),
+                ),
               ),
             ),
           // v2.8.0：后台任务卡片移到对话框顶部（不再与问询/审批卡堆在底部），可收纳、默认收起
@@ -2229,23 +2339,23 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           // v3.1.5：休眠会话降级常驻提示——历史只含 current surface / 配置已回退默认
           if (_historyDegraded || _configDegraded)
-            Container(
-              width: double.infinity,
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(DshSpace.chatH, DshSpace.xs, DshSpace.chatH, 0),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (_historyDegraded)
-                    Text(
-                      L10n.t('当前仅能恢复部分历史，更早内容可能不可用', 'Only partial history available'),
-                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    DshBanner(
+                      message: L10n.t('当前仅能恢复部分历史，更早内容可能不可用', 'Only partial history available'),
+                      icon: Icons.history_toggle_off,
+                      tone: DshBannerTone.info,
                     ),
+                  if (_historyDegraded && _configDegraded) const SizedBox(height: DshSpace.sm),
                   if (_configDegraded)
-                    Text(
-                      L10n.t('该会话配置已回退默认（模型/权限/预设）',
+                    DshBanner(
+                      message: L10n.t('该会话配置已回退默认（模型/权限/预设）',
                           'Session settings reverted to defaults (model/permissions)'),
-                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      icon: Icons.settings_backup_restore,
+                      tone: DshBannerTone.warn,
                     ),
                 ],
               ),
@@ -2258,8 +2368,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 Positioned.fill(child: _inHistory ? _buildHistoryView() : _buildLiveView()),
                 if (!_inHistory)
                   Positioned(
-                    bottom: 12,
-                    right: 14,
+                    bottom: DshSpace.md,
+                    right: DshSpace.md,
                     child: _JumpToLatestButton(visible: _showJumpToLatest, onTap: _jumpToLatest),
                   ),
               ],
@@ -2305,15 +2415,15 @@ class _ChatScreenState extends State<ChatScreen> {
           // 快捷动作
           if (store.actions.isNotEmpty)
             SizedBox(
-              height: 40,
+              height: DshSpace.controlMd,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(horizontal: DshSpace.chatH),
                 children: [
                   for (final a in store.actions)
                     Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: _ActionChip(action: a, onTap: () => showActionSheet(context, a)),
+                      padding: const EdgeInsets.only(right: DshSpace.sm),
+                      child: Center(child: _ActionChip(action: a, onTap: () => showActionSheet(context, a))),
                     ),
                 ],
               ),
@@ -2329,14 +2439,15 @@ class _ChatScreenState extends State<ChatScreen> {
           SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+              padding: const EdgeInsets.fromLTRB(DshSpace.chatH, DshSpace.xs, DshSpace.chatH, DshSpace.md),
               child: Container(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+                padding: const EdgeInsets.fromLTRB(DshSpace.md, DshSpace.sm, DshSpace.md, DshSpace.sm),
                 decoration: BoxDecoration(
-                  color: surface,
-                  border: Border.all(color: DshColors.line(context)),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: Theme.of(context).brightness == Brightness.dark ? DshTheme.shadowDark : DshTheme.shadow,
+                  // 官方输入框：input 面 + R28 主容器圆角 + soft 高度 + 发丝边
+                  color: c.input,
+                  border: Border.fromBorderSide(DshStroke.side(c.line4)),
+                  borderRadius: DshRadius.rPanel,
+                  boxShadow: DshShadow.soft,
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -2349,58 +2460,52 @@ class _ChatScreenState extends State<ChatScreen> {
                             controller: _inputCtrl,
                             minLines: 1,
                             maxLines: 4,
-                            style: const TextStyle(fontSize: 14.5),
+                            style: DshType.s14.copyWith(color: c.ink),
                             decoration: InputDecoration(
                               hintText: L10n.t('回复 agent…', 'Reply to agent…'),
-                              hintStyle: TextStyle(color: ink3),
+                              hintStyle: DshType.s14.copyWith(color: c.caption),
                               filled: false,
+                              isDense: true,
                               border: InputBorder.none,
                               enabledBorder: InputBorder.none,
                               focusedBorder: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                              contentPadding: const EdgeInsets.symmetric(vertical: DshSpace.sm),
                             ),
                             onSubmitted: (_) => _send(),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    // 第二层：⊕命令入口 + 模型/权限胶囊（省略显示）+ 排队发送 + 上下文圆环 + 发送
+                    const SizedBox(height: DshSpace.sm),
+                    // 第二层：⊕更多 + 模型/权限胶囊（省略显示）+ 排队发送 + 上下文圆环 + 发送
                     Row(
                       children: [
-                        // v2.8.0：命令入口——浅灰圆 +（对齐 PC 端 command）
+                        // v2.8.0：命令入口——官方图标按钮
                         // v3.0.0 图像链路：⊕ = 更多（拍照 / 从相册选择 / 命令）
-                        InkWell(
+                        DshIconButton(
+                          icon: Icons.add,
+                          size: DshSpace.controlMd,
+                          iconSize: 20,
+                          tooltip: L10n.t('更多', 'More'),
                           onTap: _showComposerMenu,
-                          borderRadius: BorderRadius.circular(16),
-                          child: Container(
-                            width: 28,
-                            height: 28,
-                            decoration: BoxDecoration(
-                              color: DshColors.line(context),
-                              shape: BoxShape.circle,
-                            ),
-                            // v2.8.0 review(P2-3)：图标用 ink3 主题自适应（深色下不再黑压黑）
-                            child: Icon(Icons.add, size: 17, color: DshColors.ink3(context)),
-                          ),
                         ),
-                        const SizedBox(width: 8),
-                        // 左侧弹性组：⊕ + 模型/权限（可收缩省略）+ 排队（固定）——
+                        const SizedBox(width: DshSpace.sm),
+                        // 左侧弹性组：模型/权限（可收缩省略）+ 排队（固定）——
                         // 整体包 Expanded，剩余空间在组内消化；右侧圆环/发送在组外固定，永不挤出
                         Expanded(
                           child: Row(
                             children: [
                               // 模型胶囊：名称省略；Flexible 空间不足时收缩（省略号），充足时自然宽
                               Flexible(
-                                child: _Pill(
+                                child: DshPill(
                                   label: _shortModel(store.sessionConfig.model),
                                   onTap: () => showModelSheet(context, store),
                                 ),
                               ),
-                              const SizedBox(width: 6),
+                              const SizedBox(width: DshSpace.sm),
                               // 权限胶囊：同上
                               Flexible(
-                                child: _Pill(
+                                child: DshPill(
                                   label: _shortPerm(_permName(store.sessionConfig.permissionPreset)),
                                   onTap: () => showPermSheet(context, store),
                                 ),
@@ -2408,8 +2513,8 @@ class _ChatScreenState extends State<ChatScreen> {
                               // 运行中且输入非空 → 「排队发送」胶囊（点击=普通发送，运行中自动排队）；
                               // 固定宽度（不参与收缩，始终完整显示）
                               if (_pageAgentStatus == 'running' && _inputCtrl.text.trim().isNotEmpty) ...[
-                                const SizedBox(width: 6),
-                                _Pill(
+                                const SizedBox(width: DshSpace.sm),
+                                DshPill(
                                   label: L10n.t('排队发送', 'Queue send'),
                                   onTap: () => _send(),
                                 ),
@@ -2417,14 +2522,15 @@ class _ChatScreenState extends State<ChatScreen> {
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: DshSpace.sm),
                         // 上下文窗口占用圆环（对齐 PC 端；数据齐全时才显示）——组外固定
                         if (_contextRatio != null) ...[
                           _ContextRing(ratio: _contextRatio!),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: DshSpace.md),
                         ],
                         // v2.7.2：发送按钮恢复原设计——运行中=停止（对齐 PC 端），空闲=发送；
                         // 长按=插队发送；运行中普通发送走「排队发送」胶囊——组外固定
+                        // 官方：圆形 36、brand 填充、发送中禁用为 line4
                         GestureDetector(
                           onTap: _sending
                               ? null
@@ -2433,27 +2539,32 @@ class _ChatScreenState extends State<ChatScreen> {
                               ? null
                               : () => _send(null, 'steer'),
                           child: Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(color: brand, borderRadius: BorderRadius.circular(9)),
+                            width: DshSpace.controlMd,
+                            height: DshSpace.controlMd,
+                            decoration: BoxDecoration(
+                              color: _sending && _pageAgentStatus != 'running' ? c.line4 : c.brand,
+                              shape: BoxShape.circle,
+                            ),
                             child: _pageAgentStatus == 'running'
                                 ? Center(
                                     child: Container(
                                       width: 10,
                                       height: 10,
                                       decoration: BoxDecoration(
-                                        color: Theme.of(context).colorScheme.onPrimary,
-                                        borderRadius: BorderRadius.circular(2),
+                                        color: c.onInk,
+                                        borderRadius: BorderRadius.circular(DshRadius.xs),
                                       ),
                                     ),
                                   )
                                 : _sending
-                                    ? SizedBox(
-                                        width: 15,
-                                        height: 15,
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: Theme.of(context).colorScheme.onPrimary),
+                                    ? Center(
+                                        child: SizedBox(
+                                          width: 15,
+                                          height: 15,
+                                          child: CircularProgressIndicator(strokeWidth: 2, color: c.caption),
+                                        ),
                                       )
-                                    : Icon(Icons.arrow_upward, size: 17, color: Theme.of(context).colorScheme.onPrimary),
+                                    : Icon(Icons.arrow_upward, size: 18, color: c.onInk),
                           ),
                         ),
                       ],
@@ -2493,56 +2604,42 @@ class _ChatScreenState extends State<ChatScreen> {
   /// v3.0.0 图像链路：⊕ = 更多菜单（拍照 / 从相册选择 / 命令）。
   Future<void> _showComposerMenu() async {
     if (_pickingImages) return;
-    final choice = await showModalBottomSheet<String>(
+    // 官方底部弹层：R28 顶角 + 拖拽把手 + 标题，行为（返回的选项字符串）不变
+    final choice = await showDshSheet<String>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => SafeArea(
+      isScrollControlled: false,
+      builder: (ctx) => DshSheet(
+        title: L10n.t('更多', 'More'),
+        padding: const EdgeInsets.only(bottom: DshSpace.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
-              child: Row(
-                children: [
-                  const Icon(Icons.add_circle_outline, size: 16, color: Color(0xFF426EFE)),
-                  const SizedBox(width: 6),
-                  Text(L10n.t('更多', 'More'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.photo_camera_outlined, size: 20),
-              title: Text(L10n.t('拍照', 'Take a photo'), style: const TextStyle(fontSize: 14)),
+            DshTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: L10n.t('拍照', 'Take a photo'),
               onTap: () => Navigator.of(ctx).pop('camera'),
             ),
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.photo_library_outlined, size: 20),
-              title: Text(L10n.t('从相册选择', 'Choose from gallery'), style: const TextStyle(fontSize: 14)),
+            DshTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: L10n.t('从相册选择', 'Choose from gallery'),
               onTap: () => Navigator.of(ctx).pop('gallery'),
             ),
             // v3.1.2（csborbbnc 反馈）：文件传输入口（系统选择器/下载保存）
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.upload_file_outlined, size: 20),
-              title: Text(L10n.t('上传文件', 'Upload file'), style: const TextStyle(fontSize: 14)),
+            DshTile(
+              leading: const Icon(Icons.upload_file_outlined),
+              title: L10n.t('上传文件', 'Upload file'),
               onTap: () => Navigator.of(ctx).pop('upload-file'),
             ),
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.download_outlined, size: 20),
-              title: Text(L10n.t('下载文件', 'Download file'), style: const TextStyle(fontSize: 14)),
+            DshTile(
+              leading: const Icon(Icons.download_outlined),
+              title: L10n.t('下载文件', 'Download file'),
               onTap: () => Navigator.of(ctx).pop('download-file'),
             ),
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.code, size: 20),
-              title: Text(L10n.t('命令', 'Commands'), style: const TextStyle(fontSize: 14)),
+            DshTile(
+              leading: const Icon(Icons.code),
+              title: L10n.t('命令', 'Commands'),
               onTap: () => Navigator.of(ctx).pop('commands'),
             ),
-            const SizedBox(height: 6),
           ],
         ),
       ),
@@ -2648,10 +2745,9 @@ class _ChatScreenState extends State<ChatScreen> {
   /// v3.0.0 图像链路：待发送图片缩略图 rail（composer 上方，可移除；PC 端 AttachmentRail 同理念）。
   Widget _buildImageRail() {
     if (_pendingImages.isEmpty) return const SizedBox.shrink();
-    final line = DshColors.line(context);
-    final ink3 = DshColors.ink3(context);
+    final c = DshPalette.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      padding: const EdgeInsets.fromLTRB(DshSpace.chatH, DshSpace.xs, DshSpace.chatH, 0),
       child: SizedBox(
         height: 76,
         child: ListView(
@@ -2659,11 +2755,11 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             for (var i = 0; i < _pendingImages.length; i++)
               Padding(
-                padding: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.only(right: DshSpace.sm),
                 child: Stack(
                   children: [
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: DshRadius.rMd,
                       child: Image.file(
                         File(_pendingImages[i].path),
                         width: 76,
@@ -2676,30 +2772,37 @@ class _ChatScreenState extends State<ChatScreen> {
                         errorBuilder: (_, _, _) => Container(
                           width: 76,
                           height: 76,
-                          color: line,
-                          child: const Icon(Icons.image_outlined, color: Colors.white54),
+                          color: c.module,
+                          child: Icon(Icons.image_outlined, color: c.caption),
                         ),
                       ),
                     ),
                     Positioned(
-                      top: 2,
-                      right: 2,
+                      top: DshSpace.xs,
+                      right: DshSpace.xs,
                       child: InkWell(
                         onTap: () => setState(() => _pendingImages.removeAt(i)),
+                        customBorder: const CircleBorder(),
                         child: Container(
-                          decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                          padding: const EdgeInsets.all(2),
-                          child: const Icon(Icons.close, size: 13, color: Colors.white),
+                          // 移除键压在缩略图上：深色浮层底 + onToast 图标
+                          decoration: BoxDecoration(color: c.toast, shape: BoxShape.circle),
+                          padding: const EdgeInsets.all(DshSpace.xxs),
+                          child: Icon(Icons.close, size: 13, color: c.onToast),
                         ),
                       ),
                     ),
                   ],
                 ),
               ),
-            IconButton(
-              onPressed: _pickingImages ? null : () => _pickImages(fromCamera: false),
-              icon: Icon(Icons.add_photo_alternate_outlined, size: 22, color: ink3),
-              tooltip: L10n.t('继续添加', 'Add more'),
+            Center(
+              child: DshIconButton(
+                icon: Icons.add_photo_alternate_outlined,
+                size: DshSpace.controlLg,
+                iconSize: 20,
+                color: c.ink2,
+                tooltip: L10n.t('继续添加', 'Add more'),
+                onTap: _pickingImages ? null : () => _pickImages(fromCamera: false),
+              ),
             ),
           ],
         ),
@@ -2730,36 +2833,27 @@ class _ChatScreenState extends State<ChatScreen> {
       showToast(context, L10n.t('当前会话没有可用命令', 'No commands available for this session'));
       return;
     }
-    final picked = await showModalBottomSheet<String>(
+    final picked = await showDshSheet<String>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => SafeArea(
+      isScrollControlled: false,
+      builder: (ctx) => DshSheet(
+        title: L10n.t('命令', 'Commands'),
+        padding: const EdgeInsets.only(bottom: DshSpace.lg),
+        // 命令多时可滚动——DshSheet 已包一层滚动容器
+        scrollable: true,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
-              child: Row(
-                children: [
-                  const Icon(Icons.code, size: 15, color: Color(0xFF426EFE)),
-                  const SizedBox(width: 6),
-                  Text(L10n.t('命令', 'Commands'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
             // v2.8.0 review(P3-6)：过滤无名命令，避免填入 '/null'
             for (final c in cmds.where((c) => c['name'] is String && (c['name'] as String).isNotEmpty))
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.tag, size: 18),
-                title: Text('/${c['name']}', style: const TextStyle(fontSize: 14)),
+              DshTile(
+                leading: const Icon(Icons.tag),
+                title: '/${c['name']}',
                 subtitle: c['description'] is String && (c['description'] as String).isNotEmpty
-                    ? Text(c['description'] as String, style: TextStyle(fontSize: 12, color: DshColors.ink3(ctx)))
+                    ? c['description'] as String
                     : null,
                 onTap: () => Navigator.of(ctx).pop('/${c['name']}'),
               ),
-            const SizedBox(height: 6),
           ],
         ),
       ),
@@ -3014,6 +3108,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildItem(_MsgItem item) {
+    final c = DshPalette.of(context);
     switch (item.kind) {
       case _MsgKind.user:
         // v3.1.4（issue #12）：系统注入消息（内核 source.kind ≠ "user"）不当普通气泡铺屏，
@@ -3024,7 +3119,7 @@ class _ChatScreenState extends State<ChatScreen> {
           final ikey = item.messageId ?? 's${item.seq}';
           final expanded = widget.store.reasoningOverrideOf(_mySessionId ?? '', 'inj:$ikey') ?? false;
           return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: DshSpace.md),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -3043,7 +3138,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 if (expanded && (item.images.isNotEmpty || item.files.isNotEmpty))
                   Padding(
-                    padding: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.only(top: DshSpace.sm),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -3062,15 +3157,16 @@ class _ChatScreenState extends State<ChatScreen> {
         // v3.0.0(热修 07)：不再剥离 [图片]——占位改由服务端 user 摘要直接去除
         // （blocksToText imagePlaceholder:false），客户端保留用户原文，不误删手打内容。
         final text = item.text;
+        // 官方用户气泡：bubble 底 + R16 + 12/10 内边距 + 屏宽 82% 上限；无投影，靠底色与页面分层
         Widget userBubble(Widget child) => Align(
               alignment: Alignment.centerRight,
               child: Container(
-                margin: const EdgeInsets.only(bottom: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                margin: const EdgeInsets.only(bottom: DshSpace.xs),
+                padding: const EdgeInsets.symmetric(horizontal: DshSpace.md, vertical: 10),
                 constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
                 decoration: BoxDecoration(
-                  color: DshColors.bubble(context),
-                  borderRadius: BorderRadius.circular(22),
+                  color: c.bubble,
+                  borderRadius: DshRadius.rLg,
                 ),
                 child: child,
               ),
@@ -3083,14 +3179,15 @@ class _ChatScreenState extends State<ChatScreen> {
              if (item.files.isNotEmpty)
                userBubble(_FileResults(files: item.files)),
             if (text.isNotEmpty)
-              userBubble(Text(text, style: const TextStyle(fontSize: 14, height: 1.57))),
+              // 中文正文行高按官方 14/24，不再压到 1.57
+              userBubble(Text(text, style: DshType.mdBase.copyWith(color: c.ink))),
             // v3.1.5（issue #15）：用户消息此前没有任何复制入口（只有助手消息有操作栏）——
             // 这里右对齐补一个「复制」，复用 _runMessageAction('copy')：复制正文 + 「已复制」提示，
             // 与助手消息行为一致。整段选择另由 SelectionArea 承担（长按选词）。
             Align(
               alignment: Alignment.centerRight,
               child: Padding(
-                padding: const EdgeInsets.only(right: 2, bottom: 14),
+                padding: const EdgeInsets.only(bottom: DshSpace.md),
                 child: _ActionIcon(
                   icon: Icons.content_copy,
                   tooltip: L10n.t('复制', 'Copy'),
@@ -3124,53 +3221,75 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
             if (item.detailDegraded)
-               Padding(
-                 padding: const EdgeInsets.only(left: 4, bottom: 4),
-                 child: Text(L10n.t('详情来自当前界面，可能不完整', 'Details came from the current surface and may be incomplete'), style: TextStyle(fontSize: 11, color: Colors.orange)),
-               ),
-             if (item.detailErrorCode != null)
-               Padding(
-                 padding: const EdgeInsets.only(left: 4, bottom: 4),
-                 child: Row(
-                   mainAxisSize: MainAxisSize.min,
-                   children: [
-                     Text(_detailErrorLabel(item.detailErrorCode!), style: const TextStyle(fontSize: 11, color: Colors.redAccent)),
-                     TextButton(onPressed: _api.timelineCapabilities.detail ? () => _loadEventDetail(item) : null, child: Text(L10n.t('重试', 'Retry'))),
-                   ],
-                 ),
-               ),
-             // 需求变更（issue #1）：assistant 产出文件不再展示（时间线不提供该下载入口）。
+              Padding(
+                padding: const EdgeInsets.only(bottom: DshSpace.xs),
+                child: DshBanner(
+                  message: L10n.t('详情来自当前界面，可能不完整',
+                      'Details came from the current surface and may be incomplete'),
+                  icon: Icons.info_outline,
+                  tone: DshBannerTone.warn,
+                ),
+              ),
+            if (item.detailErrorCode != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: DshSpace.xs),
+                child: DshBanner(
+                  message: _detailErrorLabel(item.detailErrorCode!),
+                  icon: Icons.error_outline,
+                  tone: DshBannerTone.danger,
+                  trailing: DshButton(
+                    label: L10n.t('重试', 'Retry'),
+                    variant: DshButtonVariant.outline,
+                    size: DshButtonSize.sm,
+                    onPressed: _api.timelineCapabilities.detail ? () => _loadEventDetail(item) : null,
+                  ),
+                ),
+              ),
+            // 需求变更（issue #1）：assistant 产出文件不再展示（时间线不提供该下载入口）。
             // 详情入口（issue #1 需求变更）：普通模式只在**确有正文增量**时出现
-             // （服务端 detail.textChars 大于当前可见正文长度）；调试模式提供原始事件入口。
-             // 两者都不再默认出现“看着像能加载更多、实际只会多出一份思维链”的按钮。
-             if (item.detailAvailable && item.seq != null && (widget.store.timelineDebug || timelineHasTextIncrement(item.detailTextChars, item.text.length)))
-               Padding(
-                 padding: const EdgeInsets.only(left: 4, bottom: 4),
-                 child: Row(
-                   mainAxisSize: MainAxisSize.min,
-                   children: [
-  if (item.detailLoading) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-                     TextButton(
-                       onPressed: _api.timelineCapabilities.detail ? () => _loadEventDetail(item) : null,
-                       child: Text(
-                         widget.store.timelineDebug
-                             ? (item.rawData == null ? L10n.t('查看原始事件', 'View raw event') : L10n.t('重新加载原始事件', 'Reload raw event'))
-                             : (item.rawData == null ? L10n.t('加载完整正文', 'Load full response') : L10n.t('重新加载正文', 'Reload full response')),
-                       ),
-                     ),
-                   ],
-                 ),
-               )
-             else if (widget.store.timelineDebug && item.rawData == null && !item.detailAvailable)
-               Padding(
-                 padding: const EdgeInsets.only(left: 4, bottom: 4),
-                 child: Text(L10n.t('详情不可用（旧服务端未保存）', 'Detail unavailable (not retained by server)'), style: TextStyle(fontSize: 11, color: DshColors.ink3(context))),
-               ),
-             if (widget.store.timelineDebug && item.rawData != null)
-               Padding(
-                 padding: const EdgeInsets.only(left: 4, bottom: 8),
-                 child: SelectableText(_debugPreviewOf(item), style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
-               ),
+            // （服务端 detail.textChars 大于当前可见正文长度）；调试模式提供原始事件入口。
+            // 两者都不再默认出现“看着像能加载更多、实际只会多出一份思维链”的按钮。
+            if (item.detailAvailable && item.seq != null && (widget.store.timelineDebug || timelineHasTextIncrement(item.detailTextChars, item.text.length)))
+              Padding(
+                padding: const EdgeInsets.only(bottom: DshSpace.xs),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (item.detailLoading) ...[
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: c.ink3),
+                      ),
+                      const SizedBox(width: DshSpace.sm),
+                    ],
+                    DshButton(
+                      label: widget.store.timelineDebug
+                          ? (item.rawData == null ? L10n.t('查看原始事件', 'View raw event') : L10n.t('重新加载原始事件', 'Reload raw event'))
+                          : (item.rawData == null ? L10n.t('加载完整正文', 'Load full response') : L10n.t('重新加载正文', 'Reload full response')),
+                      variant: DshButtonVariant.outline,
+                      size: DshButtonSize.sm,
+                      onPressed: _api.timelineCapabilities.detail ? () => _loadEventDetail(item) : null,
+                    ),
+                  ],
+                ),
+              )
+            else if (widget.store.timelineDebug && item.rawData == null && !item.detailAvailable)
+              Padding(
+                padding: const EdgeInsets.only(bottom: DshSpace.xs),
+                child: Text(
+                  L10n.t('详情不可用（旧服务端未保存）', 'Detail unavailable (not retained by server)'),
+                  style: DshType.xxxs11.copyWith(color: c.ink3),
+                ),
+              ),
+            if (widget.store.timelineDebug && item.rawData != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: DshSpace.sm),
+                child: SelectableText(
+                  _debugPreviewOf(item),
+                  style: DshType.mdCodeBlock.copyWith(color: c.ink2),
+                ),
+              ),
              _MessageActionsBar(
               item: item,
               onAction: (a) => _runMessageAction(item, a),
@@ -3179,7 +3298,7 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       case _MsgKind.tool:
         return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.only(bottom: DshSpace.sm),
           child: _ToolActivityCard(
             key: ValueKey<String>('tool:${item.toolCallId ?? item.seq ?? item.text}:${item.seq}'),
              expandedOverride: _failureExpansionOverrides['tool:${item.toolCallId ?? item.seq}'],
@@ -3199,7 +3318,7 @@ class _ChatScreenState extends State<ChatScreen> {
           return const SizedBox.shrink();
         }
         return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.only(bottom: DshSpace.sm),
           child: _TimelineEventCard(
             key: ValueKey<String>('event:${item.eventType}:${item.seq ?? item.text}'),
              expandedOverride: _failureExpansionOverrides['event:${item.eventType}:${item.seq ?? item.text}'],
@@ -3211,10 +3330,11 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         );
       case _MsgKind.divider:
+        // 轮次分隔条：12/18 三级文字，只作节奏分割
         return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(vertical: DshSpace.sm),
           child: Center(
-            child: Text(item.text, style: TextStyle(fontSize: 11, color: DshColors.ink3(context))),
+            child: Text(item.text, style: DshType.xxs12.copyWith(color: c.ink3)),
           ),
         );
     }
@@ -3503,45 +3623,66 @@ class _InjectedBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ink3 = DshColors.ink3(context);
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: DshColors.surface(context),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: DshColors.line(context)),
-      ),
+    final c = DshPalette.of(context);
+    // 系统注入消息：官方卡片语言（R16 + 发丝边 + layer2），折叠一行摘要、展开正文
+    return DshCard(
+      radius: DshRadius.lg,
+      padding: EdgeInsets.zero,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
             onTap: () => onToggle(!expanded),
+            borderRadius: BorderRadius.circular(DshRadius.lg),
+            splashFactory: NoSplash.splashFactory,
+            highlightColor: c.hover,
+            hoverColor: c.hover,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: DshSpace.md, vertical: DshSpace.md),
               child: Row(
                 children: [
-                  Icon(timelineIsAgentMessage(sourceKind) ? Icons.account_tree_outlined : Icons.settings_suggest_outlined, size: 14, color: ink3),
-                  const SizedBox(width: 6),
+                  DshStatusDot(color: c.ink3, size: 6),
+                  const SizedBox(width: DshSpace.sm),
+                  Icon(timelineIsAgentMessage(sourceKind) ? Icons.account_tree_outlined : Icons.settings_suggest_outlined, size: 16, color: c.ink3),
+                  const SizedBox(width: DshSpace.sm),
                   Expanded(
                     child: Text(
                       '$_label${senderSessionId == null ? '' : ' · $senderSessionId'} · ${text.length} ${L10n.t('字', 'chars')}',
-                      style: TextStyle(fontSize: 11.5, color: ink3, fontWeight: FontWeight.w600),
+                      style: DshType.xsStrong13.copyWith(color: c.ink3),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 16, color: ink3),
+                  AnimatedRotation(
+                    turns: expanded ? 0.5 : 0,
+                    duration: DshMotion.normal,
+                    curve: DshMotion.standard,
+                    child: Icon(Icons.keyboard_arrow_down, size: 16, color: c.ink3),
+                  ),
                 ],
               ),
             ),
           ),
-          if (expanded)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 260),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                child: Text(text, style: TextStyle(fontSize: 12.5, height: 1.45, color: ink3)),
-              ),
-            ),
+          AnimatedSize(
+            duration: DshMotion.normal,
+            curve: DshMotion.standard,
+            alignment: Alignment.topLeft,
+            child: expanded
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 260),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(DshSpace.md, 0, DshSpace.md, DshSpace.md),
+                      // 展开正文：左侧 2px line3 竖线 + xs13 次级文字
+                      child: Container(
+                        padding: const EdgeInsets.only(left: DshSpace.md),
+                        decoration: BoxDecoration(
+                          border: Border(left: BorderSide(color: c.line3, width: 2)),
+                        ),
+                        child: Text(text, style: DshType.xs13.copyWith(color: c.ink2)),
+                      ),
+                    ),
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
         ],
       ),
     );
@@ -3649,36 +3790,52 @@ class _ToolActivityCardState extends State<_ToolActivityCard> {
        RegExp(r'(^|\n)\s{0,3}(#{1,6} |[-*] |\d+\. )').hasMatch(value) ||
        value.contains('**') || value.contains('`');
 
-   Widget _markdownResult(String value) => Padding(
-         padding: const EdgeInsets.only(top: 8),
-         child: Container(
-           width: double.infinity,
-           padding: const EdgeInsets.all(8),
-           decoration: BoxDecoration(color: DshColors.surface(context), borderRadius: BorderRadius.circular(6)),
-           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: renderMarkdownBlocks(value, context)),
+   Widget _markdownResult(String value) {
+     final c = DshPalette.of(context);
+     return Padding(
+       padding: const EdgeInsets.only(top: DshSpace.sm),
+       child: Container(
+         width: double.infinity,
+         padding: const EdgeInsets.all(DshSpace.md),
+         decoration: BoxDecoration(
+           color: c.codeBlock,
+           borderRadius: BorderRadius.circular(DshRadius.md),
          ),
-       );
+         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: renderMarkdownBlocks(value, context)),
+       ),
+     );
+   }
 
-   Widget _code(String label, String value) => Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: DshColors.ink3(context))),
-            const SizedBox(height: 3),
-            Container(
-              width: double.infinity,
-              constraints: const BoxConstraints(maxHeight: 260),
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: DshColors.surface(context), borderRadius: BorderRadius.circular(6)),
-              child: SingleChildScrollView(child: SelectableText(value, style: const TextStyle(fontSize: 11, height: 1.35, fontFamily: 'monospace'))),
-            ),
-          ],
-        ),
-      );
+   Widget _code(String label, String value) {
+     final c = DshPalette.of(context);
+     return Padding(
+       padding: const EdgeInsets.only(top: DshSpace.sm),
+       child: Column(
+         crossAxisAlignment: CrossAxisAlignment.start,
+         children: [
+           Text(label, style: DshType.xxxsStrong11.copyWith(color: c.ink3)),
+           const SizedBox(height: DshSpace.xs),
+           Container(
+             width: double.infinity,
+             constraints: const BoxConstraints(maxHeight: 260),
+             padding: const EdgeInsets.all(DshSpace.md),
+             decoration: BoxDecoration(
+               // 展开区：官方 codeBlock 底 + 紧凑 mono
+               color: c.codeBlock,
+               borderRadius: BorderRadius.circular(DshRadius.md),
+             ),
+             child: SingleChildScrollView(
+               child: SelectableText(value, style: DshType.mdCodeSmall.copyWith(color: c.ink2)),
+             ),
+           ),
+         ],
+       ),
+     );
+   }
 
   @override
   Widget build(BuildContext context) {
+    final c = DshPalette.of(context);
     final item = widget.item;
     // 工具 schema 目前只在少数内核/服务端形态下随详情下发（tool/call 的 data 里）；
     // 内核 SessionEventMap 的 tool/call 只有 turn/step/callId/name/arguments，
@@ -3691,78 +3848,110 @@ class _ToolActivityCardState extends State<_ToolActivityCard> {
         rawData['toolSchema'] ??
         rawData['schema'] ??
         rawData['inputSchema'];
-    final accent = item.toolError ? Colors.redAccent : DshColors.brand(context);
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: DshColors.surface(context),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: item.toolError ? Colors.redAccent.withValues(alpha: .5) : DshColors.line(context)),
-      ),
+    // 状态圆点：失败 danger、成功 ok、其余（进行中/加载详情）business
+    final failed = _failed;
+    final statusColor = failed ? c.danger : (item.toolStatus == 'success' ? c.ok : c.business);
+    return DshCard(
+      radius: DshRadius.lg,
+      padding: EdgeInsets.zero,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
             onTap: () => _setExpanded(!expanded),
+            borderRadius: BorderRadius.circular(DshRadius.lg),
+            splashFactory: NoSplash.splashFactory,
+            highlightColor: c.hover,
+            hoverColor: c.hover,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: DshSpace.md, vertical: DshSpace.md),
               child: Row(
                 children: [
-                  Icon(item.toolError ? Icons.error_outline : Icons.build_outlined, size: 16, color: accent),
-                  const SizedBox(width: 7),
+                  DshStatusDot(color: statusColor, size: 8, pulse: !failed && item.toolStatus != 'success'),
+                  const SizedBox(width: DshSpace.sm),
                   Expanded(
-                    child: Text(item.toolName ?? L10n.t('工具', 'Tool'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+                    child: Text(item.toolName ?? L10n.t('工具', 'Tool'),
+                        style: DshType.xxs12.copyWith(color: c.ink3), overflow: TextOverflow.ellipsis),
                   ),
-                  Text(_status(), style: TextStyle(fontSize: 11, color: item.toolError ? Colors.redAccent : DshColors.ink3(context))),
-                  const SizedBox(width: 4),
-                  Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 18, color: DshColors.ink3(context)),
+                  const SizedBox(width: DshSpace.sm),
+                  Text(_status(), style: DshType.xxs12.copyWith(color: c.ink3)),
+                  const SizedBox(width: DshSpace.xs),
+                  AnimatedRotation(
+                    turns: expanded ? 0.5 : 0,
+                    duration: DshMotion.normal,
+                    curve: DshMotion.standard,
+                    child: Icon(Icons.keyboard_arrow_down, size: 16, color: c.ink3),
+                  ),
                 ],
               ),
             ),
           ),
-          if (expanded)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+          AnimatedSize(
+            duration: DshMotion.normal,
+            curve: DshMotion.standard,
+            alignment: Alignment.topLeft,
+            child: expanded
+                ? Padding(
+              padding: const EdgeInsets.fromLTRB(DshSpace.md, 0, DshSpace.md, DshSpace.md),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (item.toolCallId != null) Text('callId: ${item.toolCallId}', style: TextStyle(fontSize: 10, color: DshColors.ink3(context))),
+                  if (item.toolCallId != null) Text('callId: ${item.toolCallId}', style: DshType.xxxs11.copyWith(color: c.caption)),
                   if (item.toolArguments.isNotEmpty) _code(L10n.t('参数', 'Arguments'), item.toolArguments),
                   if (item.toolResult.isNotEmpty)
                      _looksMarkdown(item.toolResult) && !widget.debug
                          ? _markdownResult(item.toolResult)
                          : _code(L10n.t('结果', 'Result'), item.toolResult),
                   if (item.images.isNotEmpty) Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.only(top: DshSpace.sm),
                     child: _ImagesGrid(images: item.images, sessionId: widget.sessionId),
                    ),
                   // 需求变更（issue #1）：工具产出文件不再展示（时间线不提供该下载入口）。
-                  if (item.detailLoading) const Padding(
-                    padding: EdgeInsets.only(top: 8),
-                    child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))),
+                  if (item.detailLoading) Padding(
+                    padding: const EdgeInsets.only(top: DshSpace.sm),
+                    child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: c.ink3))),
                   ),
                   if (item.detailDegraded)
                      Padding(
-                       padding: const EdgeInsets.only(top: 8),
-                       child: Text(L10n.t('详情来自当前界面，可能不完整', 'Details came from the current surface and may be incomplete'), style: TextStyle(fontSize: 11, color: Colors.orange)),
+                       padding: const EdgeInsets.only(top: DshSpace.sm),
+                       child: DshBanner(
+                         message: L10n.t('详情来自当前界面，可能不完整', 'Details came from the current surface and may be incomplete'),
+                         icon: Icons.info_outline,
+                         tone: DshBannerTone.warn,
+                       ),
                      ),
                    if (item.detailErrorCode != null)
                      Padding(
-                       padding: const EdgeInsets.only(top: 8),
-                       child: Text(_detailErrorLabel(item.detailErrorCode!), style: TextStyle(fontSize: 11, color: Colors.redAccent)),
+                       padding: const EdgeInsets.only(top: DshSpace.sm),
+                       child: DshBanner(
+                         message: _detailErrorLabel(item.detailErrorCode!),
+                         icon: Icons.error_outline,
+                         tone: DshBannerTone.danger,
+                       ),
                      ),
                    if (!item.detailAvailable && item.rawData == null)
                     Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(L10n.t('详情不可用（旧服务端未保存）', 'Details unavailable (not retained by the server)'), style: TextStyle(fontSize: 11, color: DshColors.ink3(context))),
+                      padding: const EdgeInsets.only(top: DshSpace.sm),
+                      child: Text(L10n.t('详情不可用（旧服务端未保存）', 'Details unavailable (not retained by the server)'),
+                          style: DshType.xxxs11.copyWith(color: c.ink3)),
                     ),
                   if (item.detailErrorCode != null && widget.onLoadDetail != null)
-                    TextButton(onPressed: () { requested = false; widget.onLoadDetail!(); }, child: Text(L10n.t('重试', 'Retry'))),
+                    Padding(
+                      padding: const EdgeInsets.only(top: DshSpace.sm),
+                      child: DshButton(
+                        label: L10n.t('重试', 'Retry'),
+                        variant: DshButtonVariant.outline,
+                        size: DshButtonSize.sm,
+                        onPressed: () { requested = false; widget.onLoadDetail!(); },
+                      ),
+                    ),
                   if (widget.debug && schema != null) _code(L10n.t('工具 schema', 'Tool schema'), _pretty(schema)),
                    if (widget.debug && item.rawData != null) _code(L10n.t('原始事件', 'Raw event'), _pretty(item.rawData)),
                 ],
               ),
-            ),
+            )
+                : const SizedBox(width: double.infinity),
+          ),
         ],
       ),
     );
@@ -3845,58 +4034,108 @@ class _TimelineEventCardState extends State<_TimelineEventCard> {
 
   @override
   Widget build(BuildContext context) {
+    final c = DshPalette.of(context);
     final item = widget.item;
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: DshColors.surface(context),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: item.toolError ? Colors.redAccent.withValues(alpha: .5) : DshColors.line(context)),
-      ),
+    return DshCard(
+      radius: DshRadius.lg,
+      padding: EdgeInsets.zero,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
             onTap: () => _toggle(!expanded),
+            borderRadius: BorderRadius.circular(DshRadius.lg),
+            splashFactory: NoSplash.splashFactory,
+            highlightColor: c.hover,
+            hoverColor: c.hover,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: DshSpace.md, vertical: DshSpace.md),
               child: Row(
                 children: [
-                  Icon(item.toolError ? Icons.error_outline : Icons.bolt_outlined, size: 15, color: DshColors.ink3(context)),
-                  const SizedBox(width: 7),
-                  Expanded(child: Text(item.text.split('\n').first, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
-                  if (item.seq != null) Text('#${item.seq}', style: TextStyle(fontSize: 10, color: DshColors.ink3(context))),
-                  const SizedBox(width: 4),
-                  Icon(expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, size: 17, color: DshColors.ink3(context)),
+                  // 时间线事件卡：状态点承载成败，标题走 xs13 次级文字
+                  DshStatusDot(color: item.toolError ? c.danger : c.ink3, size: 6),
+                  const SizedBox(width: DshSpace.sm),
+                  Expanded(
+                    child: Text(item.text.split('\n').first,
+                        style: DshType.xs13.copyWith(color: c.ink2), overflow: TextOverflow.ellipsis),
+                  ),
+                  if (item.seq != null) Text('#${item.seq}', style: DshType.xxxs11.copyWith(color: c.caption)),
+                  const SizedBox(width: DshSpace.xs),
+                  AnimatedRotation(
+                    turns: expanded ? 0.5 : 0,
+                    duration: DshMotion.normal,
+                    curve: DshMotion.standard,
+                    child: Icon(Icons.keyboard_arrow_down, size: 16, color: c.ink3),
+                  ),
                 ],
               ),
             ),
           ),
-          if (expanded)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+          AnimatedSize(
+            duration: DshMotion.normal,
+            curve: DshMotion.standard,
+            alignment: Alignment.topLeft,
+            child: expanded
+                ? Padding(
+              padding: const EdgeInsets.fromLTRB(DshSpace.md, 0, DshSpace.md, DshSpace.md),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (item.text.contains('\n')) Padding(padding: const EdgeInsets.only(top: 6), child: Text(item.text.substring(item.text.indexOf('\n') + 1), style: const TextStyle(fontSize: 12, height: 1.4))),
-                  if (item.detailLoading) const Padding(padding: EdgeInsets.only(top: 8), child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)))),
+                  if (item.text.contains('\n'))
+                    Padding(
+                      padding: const EdgeInsets.only(top: DshSpace.sm),
+                      child: Text(item.text.substring(item.text.indexOf('\n') + 1),
+                          style: DshType.xs13.copyWith(color: c.ink2)),
+                    ),
+                  if (item.detailLoading)
+                    Padding(
+                      padding: const EdgeInsets.only(top: DshSpace.sm),
+                      child: Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: c.ink3))),
+                    ),
                   if (item.detailDegraded)
                      Padding(
-                       padding: const EdgeInsets.only(top: 8),
-                       child: Text(L10n.t('详情来自当前界面，可能不完整', 'Details came from the current surface and may be incomplete'), style: TextStyle(fontSize: 11, color: Colors.orange)),
+                       padding: const EdgeInsets.only(top: DshSpace.sm),
+                       child: DshBanner(
+                         message: L10n.t('详情来自当前界面，可能不完整', 'Details came from the current surface and may be incomplete'),
+                         icon: Icons.info_outline,
+                         tone: DshBannerTone.warn,
+                       ),
                      ),
                    if (item.detailErrorCode != null)
                      Padding(
-                       padding: const EdgeInsets.only(top: 8),
-                       child: Text(_detailErrorLabel(item.detailErrorCode!), style: TextStyle(fontSize: 11, color: Colors.redAccent)),
+                       padding: const EdgeInsets.only(top: DshSpace.sm),
+                       child: DshBanner(
+                         message: _detailErrorLabel(item.detailErrorCode!),
+                         icon: Icons.error_outline,
+                         tone: DshBannerTone.danger,
+                       ),
                      ),
-                   if (!item.detailAvailable && item.rawData == null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(L10n.t('详情不可用', 'Details unavailable'), style: TextStyle(fontSize: 11, color: DshColors.ink3(context)))),
+                   if (!item.detailAvailable && item.rawData == null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: DshSpace.sm),
+                      child: Text(L10n.t('详情不可用', 'Details unavailable'),
+                          style: DshType.xxxs11.copyWith(color: c.ink3)),
+                    ),
                   if (item.detailErrorCode != null && widget.onLoadDetail != null)
-                    TextButton(onPressed: () { requested = false; widget.onLoadDetail!(); }, child: Text(L10n.t('重试', 'Retry'))),
-                  if (widget.debug && item.rawData != null) Padding(padding: const EdgeInsets.only(top: 8), child: SelectableText(_rawPreview, style: const TextStyle(fontSize: 11, fontFamily: 'monospace'))),
+                    Padding(
+                      padding: const EdgeInsets.only(top: DshSpace.sm),
+                      child: DshButton(
+                        label: L10n.t('重试', 'Retry'),
+                        variant: DshButtonVariant.outline,
+                        size: DshButtonSize.sm,
+                        onPressed: () { requested = false; widget.onLoadDetail!(); },
+                      ),
+                    ),
+                  if (widget.debug && item.rawData != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: DshSpace.sm),
+                      child: SelectableText(_rawPreview, style: DshType.mdCodeBlock.copyWith(color: c.ink2)),
+                    ),
                 ],
               ),
-            ),
+            )
+                : const SizedBox(width: double.infinity),
+          ),
         ],
       ),
     );
@@ -3934,88 +4173,89 @@ class _TodoPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final brand = DshColors.brand(context);
+    final c = DshPalette.of(context);
     final summary = [
       if (inProgress > 0) L10n.t('$inProgress 进行中', '$inProgress in progress'),
       if (pending > 0) L10n.t('$pending 待处理', '$pending pending'),
       if (completed > 0) L10n.t('$completed 已完成', '$completed done'),
     ].join(' · ');
+    // 官方卡片 + DshTile 语言：卡片承载清单，标题行走 tile（左图标/标题/尾部箭头）
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 2, 14, 0),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: onToggle,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.checklist_rtl, size: 13, color: ink3),
-                  const SizedBox(width: 5),
-                  Text(
-                    L10n.t('任务', 'Tasks'),
-                    style: TextStyle(fontSize: 11.5, color: ink3, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      summary,
-                      style: TextStyle(fontSize: 11.5, color: ink2),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 3),
-                  Icon(collapsed ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up, size: 15, color: ink3),
-                ],
+      padding: const EdgeInsets.fromLTRB(DshSpace.chatH, DshSpace.xs, DshSpace.chatH, 0),
+      child: DshCard(
+        radius: DshRadius.lg,
+        padding: EdgeInsets.zero,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DshTile(
+              dense: true,
+              borderRadius: DshRadius.lg,
+              leading: const Icon(Icons.checklist_rtl),
+              title: L10n.t('任务', 'Tasks'),
+              subtitle: summary,
+              trailing: AnimatedRotation(
+                turns: collapsed ? 0 : 0.5,
+                duration: DshMotion.normal,
+                curve: DshMotion.standard,
+                child: Icon(Icons.keyboard_arrow_down, size: 16, color: c.ink3),
               ),
+              onTap: onToggle,
             ),
-          ),
-          if (!collapsed)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 150),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (final todo in todos)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Icon(
-                                _statusIcon(todo['status']),
-                                size: 13,
-                                color: todo['status'] == 'completed' ? ink3 : brand,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                '${todo['content'] ?? ''}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  height: 1.35,
-                                  color: todo['status'] == 'completed' ? ink3 : ink2,
+            AnimatedSize(
+              duration: DshMotion.normal,
+              curve: DshMotion.standard,
+              alignment: Alignment.topLeft,
+              child: collapsed
+                  ? const SizedBox(width: double.infinity)
+                  : Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          DshSpace.md, 0, DshSpace.md, DshSpace.md),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 150),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (final todo in todos)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: DshSpace.xs),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: DshSpace.xxs),
+                                        child: Icon(
+                                          _statusIcon(todo['status']),
+                                          size: 14,
+                                          color: todo['status'] == 'completed' ? c.ink3 : c.business,
+                                        ),
+                                      ),
+                                      const SizedBox(width: DshSpace.sm),
+                                      Expanded(
+                                        child: Text(
+                                          '${todo['content'] ?? ''}',
+                                          style: DshType.xs13.copyWith(
+                                            color: todo['status'] == 'completed' ? c.ink3 : c.ink2,
+                                            decoration: todo['status'] == 'completed'
+                                                ? TextDecoration.lineThrough
+                                                : null,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                  ],
-                ),
-              ),
+                    ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -4071,41 +4311,47 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
         AppLog.instance.log('Chat: bubble 解析 len=${widget.text.length} blocks=${_blocks!.length}');
       }
     }
-    final ink3 = DshColors.ink3(context);
+    final c = DshPalette.of(context);
     final hasReasoning = (widget.reasoning ?? '').isNotEmpty;
+    // 官方助手消息：全宽正文、无气泡、无头像标签；左右边距由列表 chatH 提供
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
         width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
+        margin: const EdgeInsets.only(bottom: DshSpace.lg),
+        padding: EdgeInsets.zero,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Text('✦ Agent',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: DshColors.ink2(context))),
-                const SizedBox(width: 7),
-                if (widget.streaming)
-                  const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5)),
-              ],
-            ),
-            const SizedBox(height: 3),
+            if (widget.streaming)
+              Padding(
+                padding: const EdgeInsets.only(bottom: DshSpace.xs),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(strokeWidth: 1.5, color: c.ink3),
+                    ),
+                    const SizedBox(width: DshSpace.sm),
+                    Text(L10n.t('生成中…', 'Generating…'), style: DshType.xxs12.copyWith(color: c.ink3)),
+                  ],
+                ),
+              ),
             if (hasReasoning) _buildReasoningChain(context),
             ..._blocks!,
             // v3.0.0 图像链路：附图（agent 回复里的图片，点击全屏）
             if (widget.images.isNotEmpty) ...[
-              const SizedBox(height: 6),
+              const SizedBox(height: DshSpace.sm),
               _ImagesGrid(images: widget.images, sessionId: widget.sessionId),
             ],
             if (widget.usage != null &&
                 ((widget.usage!['inputTokens'] as num? ?? 0) > 0 || (widget.usage!['outputTokens'] as num? ?? 0) > 0))
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: DshSpace.xs),
                 child: Text(
                   _fmtMsgUsage(widget.usage!),
-                  style: TextStyle(fontSize: 10.5, color: ink3),
+                  style: DshType.xxxs11.copyWith(color: c.ink3),
                 ),
               ),
           ],
@@ -4114,59 +4360,67 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
     );
   }
 
-  /// 可折叠「思维链」块：标题行（图标 + 字数 + 箭头）点按切换展开/收起，内容为斜体浅灰小字。
+  /// 可折叠「思维链」块：折叠行 xs13 ink3 + 左侧状态点，展开内容 xs13 ink2 配 2px line3 竖线。
+  /// 折叠过渡统一走 DshMotion.standard / DshMotion.normal。
   Widget _buildReasoningChain(BuildContext context) {
+    final c = DshPalette.of(context);
     final expanded = widget.expandedOverride ?? widget.defaultExpanded;
     final reasoning = widget.reasoning ?? '';
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final brand = DshColors.brand(context);
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
-        color: DshColors.brandSoft(context),
-        border: Border.all(color: line),
-        borderRadius: BorderRadius.circular(10),
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DshSpace.sm),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           InkWell(
             onTap: () => widget.onOverride?.call(!expanded),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(DshRadius.sm),
+            splashFactory: NoSplash.splashFactory,
+            highlightColor: c.hover,
+            hoverColor: c.hover,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              padding: const EdgeInsets.symmetric(vertical: DshSpace.xs, horizontal: DshSpace.xs),
               child: Row(
                 children: [
-                  Icon(Icons.psychology_outlined, size: 15, color: brand),
-                  const SizedBox(width: 6),
+                  DshStatusDot(color: c.ink3, size: 6),
+                  const SizedBox(width: DshSpace.sm),
                   Expanded(
                     child: Text(
                       L10n.t('思维链 ${reasoning.length} 字', 'Thinking chain · ${reasoning.length} chars'),
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ink2),
+                      style: DshType.xs13.copyWith(color: c.ink3),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Icon(
-                    expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                    size: 16,
-                    color: ink3,
+                  AnimatedRotation(
+                    turns: expanded ? 0.5 : 0,
+                    duration: DshMotion.normal,
+                    curve: DshMotion.standard,
+                    child: Icon(Icons.keyboard_arrow_down, size: 16, color: c.ink3),
                   ),
                 ],
               ),
             ),
           ),
-          if (expanded)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-              child: SelectableText(
-                reasoning,
-                style: TextStyle(fontSize: 12, height: 1.6, color: ink3, fontStyle: FontStyle.italic),
-              ),
-            ),
+          AnimatedSize(
+            duration: DshMotion.normal,
+            curve: DshMotion.standard,
+            alignment: Alignment.topLeft,
+            child: expanded
+                ? Padding(
+                    padding: const EdgeInsets.only(top: DshSpace.xs),
+                    child: Container(
+                      padding: const EdgeInsets.only(left: DshSpace.md),
+                      decoration: BoxDecoration(
+                        border: Border(left: BorderSide(color: c.line3, width: 2)),
+                      ),
+                      child: SelectableText(
+                        reasoning,
+                        style: DshType.xs13.copyWith(color: c.ink2),
+                      ),
+                    ),
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
         ],
       ),
     );
@@ -4230,34 +4484,38 @@ class _FileResultTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = DshPalette.of(context);
     final mediaType = file['mediaType']?.toString();
     final sizeValue = file['size'];
     final size = sizeValue is num ? sizeValue.toInt() : null;
+    // 附件行：module 面 + R12，不描边不投影（叠在用户气泡里靠底色分层）
     return Padding(
-      padding: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.only(top: DshSpace.sm),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: DshSpace.md, vertical: DshSpace.sm),
         decoration: BoxDecoration(
-          color: DshColors.surface(context),
-          border: Border.all(color: DshColors.line(context)),
-          borderRadius: BorderRadius.circular(8),
+          color: c.module,
+          borderRadius: BorderRadius.circular(DshRadius.md),
         ),
         child: Row(
           children: [
-            const Icon(Icons.insert_drive_file_outlined, size: 18),
-            const SizedBox(width: 7),
+            Icon(Icons.insert_drive_file_outlined, size: 18, color: c.ink2),
+            const SizedBox(width: DshSpace.sm),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text(_label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: DshType.xsStrong13.copyWith(color: c.ink)),
                   if (mediaType != null || size != null)
                     Text(
                       [
                         if (mediaType != null && mediaType.isNotEmpty) mediaType,
                         if (size != null) '${(size / 1024).ceil()} KB',
                       ].join(' · '),
-                      style: TextStyle(fontSize: 10, color: DshColors.ink3(context)),
+                      style: DshType.xxxs11.copyWith(color: c.ink3),
                     ),
                 ],
               ),
@@ -4369,8 +4627,9 @@ class _MsgImageState extends State<_MsgImage> {
     showDialog<void>(
       context: context,
       builder: (ctx) => Dialog(
+        // 全屏看图：纯黑底 + 纯白图标（图片查看器例外，不参与主题配色）
         backgroundColor: Colors.black,
-        insetPadding: const EdgeInsets.all(12),
+        insetPadding: const EdgeInsets.all(DshSpace.md),
         child: Stack(
           children: [
             InteractiveViewer(
@@ -4379,19 +4638,22 @@ class _MsgImageState extends State<_MsgImage> {
               child: Image.memory(b, fit: BoxFit.contain, width: double.infinity),
             ),
             Positioned(
-              top: 8,
-              right: 8,
+              top: DshSpace.sm,
+              right: DshSpace.sm,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  IconButton(
-                    onPressed: _saveImage,
+                  DshIconButton(
+                    icon: Icons.download_outlined,
+                    color: Colors.white,
                     tooltip: L10n.t('保存图片', 'Save image'),
-                    icon: const Icon(Icons.download_outlined, color: Colors.white),
+                    onTap: _saveImage,
                   ),
-                  IconButton(
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    icon: const Icon(Icons.close, color: Colors.white),
+                  DshIconButton(
+                    icon: Icons.close,
+                    color: Colors.white,
+                    tooltip: L10n.t('关闭', 'Close'),
+                    onTap: () => Navigator.of(ctx).pop(),
                   ),
                 ],
               ),
@@ -4411,7 +4673,7 @@ class _MsgImageState extends State<_MsgImage> {
     final ratio = (w > 0 && h > 0) ? (w / h).clamp(0.3, 3.0) : 1.5;
     final boxW = 236.0;
     final boxH = (boxW / ratio).clamp(80.0, 480.0);
-    final line = DshColors.line(context);
+    final c = DshPalette.of(context);
     // v3.0.0(版本二)：GIF 动图 Flutter 原生支持（MultiFrameImageStreamCompleter 逐帧播放），
     // 无需第三方包；超大 GIF（长边>4096 或 >16MB）解码耗 CPU/首帧慢，加"GIF·原图较大"角标提醒
     final isGif = widget.image['mediaType'] == 'image/gif';
@@ -4420,13 +4682,13 @@ class _MsgImageState extends State<_MsgImage> {
     return GestureDetector(
       onTap: _bytes != null ? _openFull : null,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: DshRadius.rMd,
         child: Container(
           width: boxW,
           height: boxH,
-          color: line,
+          color: c.module,
           child: _loading
-              ? const Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+              ? Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: c.ink3)))
               : _bytes != null
                   ? Stack(
                       fit: StackFit.expand,
@@ -4436,16 +4698,17 @@ class _MsgImageState extends State<_MsgImage> {
                         Image.memory(_bytes!, fit: BoxFit.contain, gaplessPlayback: true, cacheWidth: 480),
                         if (bigGif)
                           Positioned(
-                            right: 4,
-                            bottom: 4,
+                            right: DshSpace.xs,
+                            bottom: DshSpace.xs,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              padding: const EdgeInsets.symmetric(horizontal: DshSpace.sm, vertical: DshSpace.xxs),
                               decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.55),
-                                borderRadius: BorderRadius.circular(4),
+                                // 角标压在图片上：深色浮层底 + onToast 文字（官方浮层配色）
+                                color: c.toast,
+                                borderRadius: BorderRadius.circular(DshRadius.xs),
                               ),
                               child: Text(L10n.t('GIF·原图较大', 'GIF · large file'),
-                                  style: const TextStyle(fontSize: 9.5, color: Colors.white)),
+                                  style: DshType.xxxs11.copyWith(color: c.onToast)),
                             ),
                           ),
                       ],
@@ -4456,10 +4719,10 @@ class _MsgImageState extends State<_MsgImage> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.broken_image_outlined, size: 24, color: DshColors.ink3(context)),
-                            const SizedBox(height: 4),
+                            Icon(Icons.broken_image_outlined, size: 24, color: c.ink3),
+                            const SizedBox(height: DshSpace.xs),
                             Text(L10n.t('加载失败，点按重试', 'Failed to load — tap to retry'),
-                                style: TextStyle(fontSize: 10.5, color: DshColors.ink3(context))),
+                                style: DshType.xxs12.copyWith(color: c.ink3)),
                           ],
                         ),
                       ),
@@ -4482,7 +4745,7 @@ class _MessageActionsBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final rating = item.rating;
     return Padding(
-      padding: const EdgeInsets.only(left: 2, bottom: 14),
+      padding: const EdgeInsets.only(bottom: DshSpace.md),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -4528,23 +4791,16 @@ class _ActionIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final brand = DshColors.brand(context);
-    final brandSoft = DshColors.brandSoft(context);
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(28),
-        child: Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: active ? brandSoft : Colors.transparent,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, size: 15, color: active ? brand : DshColors.ink3(context)),
-        ),
-      ),
+    final c = DshPalette.of(context);
+    // 官方消息操作条：H28 图标按钮、16px 图标、三级文字色；选中态用业务蓝 + nav 底
+    return DshIconButton(
+      icon: icon,
+      tooltip: tooltip,
+      size: DshSpace.controlSm,
+      iconSize: 16,
+      selected: active,
+      color: active ? c.business : c.ink3,
+      onTap: onTap,
     );
   }
 }
@@ -4569,11 +4825,7 @@ class _ActivityBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final surface = DshColors.surface(context);
-    final brand = DshColors.brand(context);
+    final c = DshPalette.of(context);
     final toolLabel = tools.isEmpty
         ? ''
         : (tools.length > 1
@@ -4588,14 +4840,14 @@ class _ActivityBar extends StatelessWidget {
         : (thinking
             ? L10n.t('思考中…（${reasoning.length} 字）', 'Thinking… (${reasoning.length} chars)')
             : L10n.t('已思考 ${reasoning.length} 字', 'Thought: ${reasoning.length} chars'));
+    // 官方活动条：module 底 + R12 + 10/8 内边距，左侧三点脉冲，状态文字 xs13 ink3
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(12, 2, 12, 4),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      margin: const EdgeInsets.fromLTRB(DshSpace.chatH, DshSpace.xxs, DshSpace.chatH, DshSpace.xs),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: DshSpace.sm),
       decoration: BoxDecoration(
-        color: surface,
-        border: Border.all(color: line),
-        borderRadius: BorderRadius.circular(12),
+        color: c.module,
+        borderRadius: BorderRadius.circular(DshRadius.md),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -4604,45 +4856,62 @@ class _ActivityBar extends StatelessWidget {
           if (reasoning.isNotEmpty)
             InkWell(
               onTap: showContent ? onToggleReasoning : null,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(DshRadius.sm),
+              splashFactory: NoSplash.splashFactory,
+              highlightColor: c.hover,
+              hoverColor: c.hover,
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
+                padding: const EdgeInsets.symmetric(vertical: DshSpace.xxs),
                 child: Row(
                   children: [
-                    Icon(Icons.psychology_outlined, size: 16, color: brand),
-                    const SizedBox(width: 6),
+                    DshDots(color: thinking ? c.business : c.ink3, size: 4),
+                    const SizedBox(width: DshSpace.sm),
                     Expanded(
                       child: Text(
                         header,
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: ink2),
+                        style: DshType.xs13.copyWith(color: c.ink3),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     if (showContent)
-                      Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 16, color: ink3),
+                      AnimatedRotation(
+                        turns: expanded ? 0.5 : 0,
+                        duration: DshMotion.normal,
+                        curve: DshMotion.standard,
+                        child: Icon(Icons.expand_more, size: 16, color: c.ink3),
+                      ),
                   ],
                 ),
               ),
             ),
           if (showContent && expanded && reasoning.isNotEmpty)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  reasoning,
-                  style: TextStyle(fontSize: 12, height: 1.55, color: ink3, fontStyle: FontStyle.italic),
+            Padding(
+              padding: const EdgeInsets.only(top: DshSpace.xs, left: DshSpace.md),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: Container(
+                  padding: const EdgeInsets.only(left: DshSpace.md),
+                  decoration: BoxDecoration(
+                    border: Border(left: BorderSide(color: c.line3, width: 2)),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      reasoning,
+                      style: DshType.xs13.copyWith(color: c.ink2),
+                    ),
+                  ),
                 ),
               ),
             ),
           if (tools.isNotEmpty)
             Padding(
-              padding: EdgeInsets.only(top: reasoning.isNotEmpty ? 4 : 0),
+              padding: EdgeInsets.only(top: reasoning.isNotEmpty ? DshSpace.sm : 0),
               child: Row(
                 children: [
-                  Icon(Icons.handyman_outlined, size: 15, color: ink2),
-                  const SizedBox(width: 6),
+                  DshStatusDot(color: c.business, size: 6, pulse: true),
+                  const SizedBox(width: DshSpace.sm),
                   Expanded(
-                    child: Text(toolLabel, style: TextStyle(fontSize: 12.5, color: ink2), overflow: TextOverflow.ellipsis),
+                    child: Text(toolLabel, style: DshType.xs13.copyWith(color: c.ink3), overflow: TextOverflow.ellipsis),
                   ),
                 ],
               ),
@@ -4671,94 +4940,91 @@ class _JobCardState extends State<_JobCard> {
 
   @override
   Widget build(BuildContext context) {
-    final brand = DshColors.brand(context);
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final surface = DshColors.surface(context);
+    final c = DshPalette.of(context);
     final running = widget.jobs.where((j) => j['status'] == 'running' || j['status'] == 'stopping').toList();
     final extra = running.length - 1;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(12, 2, 12, 2),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: surface,
-        border: Border.all(color: line),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 1),
-              child: Row(
-                children: [
-                  Icon(Icons.hourglass_top_outlined, size: 14, color: brand),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      running.length > 1
-                          ? L10n.t('后台任务 ${running.length} 个进行中', '${running.length} background tasks running')
-                          : L10n.t('后台任务进行中', 'Background task running'),
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ink2),
-                    ),
-                  ),
-                  Icon(_expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                      size: 16, color: ink3),
-                ],
+    // 官方卡片 + DshTile 语言：标题行收纳/展开，行内取消走 DshButton(danger, sm)
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(DshSpace.chatH, DshSpace.xs, DshSpace.chatH, DshSpace.xs),
+      child: DshCard(
+        radius: DshRadius.lg,
+        padding: EdgeInsets.zero,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DshTile(
+              dense: true,
+              borderRadius: DshRadius.lg,
+              leading: const Icon(Icons.hourglass_top_outlined),
+              title: running.length > 1
+                  ? L10n.t('后台任务 ${running.length} 个进行中', '${running.length} background tasks running')
+                  : L10n.t('后台任务进行中', 'Background task running'),
+              trailing: AnimatedRotation(
+                turns: _expanded ? 0.5 : 0,
+                duration: DshMotion.normal,
+                curve: DshMotion.standard,
+                child: Icon(Icons.keyboard_arrow_down, size: 16, color: c.ink3),
               ),
+              onTap: () => setState(() => _expanded = !_expanded),
             ),
-          ),
-          if (_expanded)
-            for (final j in running.take(2))
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Row(
-                  children: [
-                    Icon(Icons.circle, size: 6, color: brand),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        (j['label'] as String? ?? j['id'] as String? ?? L10n.t('任务', 'Task')).toString(),
-                        style: const TextStyle(fontSize: 11.5),
-                        overflow: TextOverflow.ellipsis,
+            AnimatedSize(
+              duration: DshMotion.normal,
+              curve: DshMotion.standard,
+              alignment: Alignment.topLeft,
+              child: !_expanded
+                  ? const SizedBox(width: double.infinity)
+                  : Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                          DshSpace.md, 0, DshSpace.md, DshSpace.md),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final j in running.take(2))
+                            Padding(
+                              padding: const EdgeInsets.only(top: DshSpace.xs),
+                              child: Row(
+                                children: [
+                                  DshStatusDot(color: c.business, size: 6),
+                                  const SizedBox(width: DshSpace.sm),
+                                  Expanded(
+                                    child: Text(
+                                      (j['label'] as String? ?? j['id'] as String? ?? L10n.t('任务', 'Task')).toString(),
+                                      style: DshType.xs13.copyWith(color: c.ink2),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: DshSpace.sm),
+                                  DshButton(
+                                    label: j['status'] == 'stopping'
+                                        ? L10n.t('停止中', 'Stopping')
+                                        : L10n.t('取消', 'Cancel'),
+                                    variant: DshButtonVariant.danger,
+                                    size: DshButtonSize.sm,
+                                    onPressed: j['status'] == 'stopping' ? null : () => widget.onKill(j['id'] as String? ?? ''),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (extra > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(top: DshSpace.sm),
+                              child: InkWell(
+                                onTap: widget.onOpen,
+                                borderRadius: BorderRadius.circular(DshRadius.sm),
+                                child: Text(
+                                  L10n.t('还有 $extra 个任务 ▸', '$extra more tasks ▸'),
+                                  style: DshType.xs13.copyWith(color: c.link),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                    TextButton(
-                      onPressed: j['status'] == 'stopping' ? null : () => widget.onKill(j['id'] as String? ?? ''),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 24),
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text(
-                        j['status'] == 'stopping'
-                            ? L10n.t('停止中', 'Stopping')
-                            : L10n.t('取消', 'Cancel'),
-                        style: TextStyle(fontSize: 11, color: j['status'] == 'stopping' ? ink3 : DshColors.danger(context)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          if (_expanded && extra > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: InkWell(
-                onTap: widget.onOpen,
-                borderRadius: BorderRadius.circular(6),
-                child: Text(
-                  L10n.t('还有 $extra 个任务 ▸', '$extra more tasks ▸'),
-                  style: TextStyle(fontSize: 11, color: brand),
-                ),
-              ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -4769,16 +5035,14 @@ class _StatusDot extends StatelessWidget {
   const _StatusDot({required this.status});
   @override
   Widget build(BuildContext context) {
-    final color = switch (status) {
-      'running' => DshColors.ok(context),
-      'waiting' => DshColors.warn(context),
-      _ => DshColors.ink3(context),
+    final c = DshPalette.of(context);
+    // 连接/会话状态：运行中 ok（脉冲）、等待 warn、离线 idle
+    final (color, pulse) = switch (status) {
+      'running' => (c.ok, true),
+      'waiting' => (c.warn, false),
+      _ => (c.idle, false),
     };
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
+    return DshStatusDot(color: color, size: 8, pulse: pulse);
   }
 }
 
@@ -4790,19 +5054,22 @@ class _OlderButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = DshPalette.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: DshSpace.sm),
       child: Center(
         child: busy
-            ? const SizedBox(
+            ? SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: CircularProgressIndicator(strokeWidth: 2, color: c.ink3),
               )
-            : TextButton.icon(
+            : DshButton(
+                label: L10n.t('查看更早的消息', 'View earlier messages'),
+                icon: Icons.history,
+                variant: DshButtonVariant.outline,
+                size: DshButtonSize.sm,
                 onPressed: onTap,
-                icon: const Icon(Icons.history, size: 16),
-                label: Text(L10n.t('查看更早的消息', 'View earlier messages'), style: TextStyle(fontSize: 12.5)),
               ),
       ),
     );
@@ -4810,7 +5077,7 @@ class _OlderButton extends StatelessWidget {
 }
 
 /// 上翻后浮于消息流右下角（输入框正上方）的"回到底部"圆钮：
-/// 灰白浅色调、向下箭头、带描边与轻阴影；淡入淡出，隐藏时不可点击。
+/// 官方浮动按钮——floating 底 + 发丝边 + prominent 高度；淡入淡出，隐藏时不可点击。
 class _JumpToLatestButton extends StatelessWidget {
   final bool visible;
   final VoidCallback onTap;
@@ -4818,25 +5085,29 @@ class _JumpToLatestButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark ? Colors.white.withValues(alpha: 0.10) : Colors.white.withValues(alpha: 0.88);
+    final c = DshPalette.of(context);
     return AnimatedOpacity(
       opacity: visible ? 1 : 0,
-      duration: const Duration(milliseconds: 160),
+      duration: DshMotion.normal,
+      curve: DshMotion.standard,
       child: IgnorePointer(
         ignoring: !visible,
-        child: Material(
-          color: bg,
-          shape: CircleBorder(side: BorderSide(color: DshColors.line(context), width: 0.8)),
-          elevation: 2,
-          shadowColor: Colors.black26,
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: SizedBox(
-              width: 38,
-              height: 38,
-              child: Icon(Icons.keyboard_arrow_down, size: 24, color: DshColors.ink2(context)),
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: c.floating,
+            shape: BoxShape.circle,
+            border: Border.fromBorderSide(DshStroke.side(c.line4)),
+            boxShadow: DshShadow.prominent,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: onTap,
+              child: Icon(Icons.keyboard_arrow_down, size: 20, color: c.ink2),
             ),
           ),
         ),
@@ -4845,18 +5116,20 @@ class _JumpToLatestButton extends StatelessWidget {
   }
 }
 
-/// 上下文窗口占用圆环（对齐 PC 端）：绿色 <70%，橙色 <90%，红色 ≥90%。
+/// 上下文窗口占用圆环（对齐 PC 端）：轨道 line2、进度 business、文字 xxs12。
 class _ContextRing extends StatelessWidget {
   final double ratio;
   const _ContextRing({required this.ratio});
 
   @override
   Widget build(BuildContext context) {
-    final color = ratio < 0.7
-        ? DshColors.ok(context)
+    final c = DshPalette.of(context);
+    // 上下文占用语义色保留：<70% 正常、70–90% 警告、≥90% 危险。
+    final tone = ratio < 0.7
+        ? c.ok
         : ratio < 0.9
-            ? DshColors.warn(context)
-            : DshColors.danger(context);
+            ? c.warn
+            : c.danger;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -4866,42 +5139,16 @@ class _ContextRing extends StatelessWidget {
           child: CircularProgressIndicator(
             value: ratio,
             strokeWidth: 2,
-            backgroundColor: DshColors.line(context),
-            color: color,
+            backgroundColor: c.line2,
+            color: tone,
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: DshSpace.xs),
         Text(
           '${(ratio * 100).round()}%',
-          style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600),
+          style: DshType.xxsStrong12.copyWith(color: tone),
         ),
       ],
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _Pill({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final ink2 = DshColors.ink2(context);
-    final line = DshColors.line(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-        decoration: BoxDecoration(color: line, borderRadius: BorderRadius.circular(999)),
-        // v2.8.0 review(P1-2)：单行 + 省略号，避免长模型名撑爆胶囊行（旧 ListView 可滚、Row 不可）
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: ink2),
-        ),
-      ),
     );
   }
 }
@@ -4913,24 +5160,8 @@ class _ActionChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final surface = DshColors.surface(context);
-    final line = DshColors.line(context);
-    final ink = DshColors.ink(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-        decoration: BoxDecoration(
-          color: surface,
-          border: Border.all(color: line),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          action['title'] as String? ?? '',
-          style: TextStyle(fontSize: 12.5, color: ink),
-        ),
-      ),
-    );
+    // 快捷动作：官方胶囊选择器语言（selector 底 + 999 圆角）
+    return DshPill(label: action['title'] as String? ?? '', onTap: onTap);
   }
 }
 
@@ -4961,74 +5192,65 @@ class _ApprovalCardState extends State<_ApprovalCard> {
 
   @override
   Widget build(BuildContext context) {
-    final warn = DshColors.warn(context);
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final danger = DshColors.danger(context);
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-      decoration: BoxDecoration(
-        color: warn.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: warn.withValues(alpha: 0.7)),
-      ),
+    final c = DshPalette.of(context);
+    // 官方卡片 + DshBanner(warn) 承载风险提示；允许=primary、拒绝=outline
+    return DshCard(
+      margin: const EdgeInsets.fromLTRB(DshSpace.chatH, 0, DshSpace.chatH, DshSpace.sm),
+      radius: DshRadius.lg,
+      padding: const EdgeInsets.all(DshSpace.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
-              Icon(Icons.admin_panel_settings_outlined, size: 18, color: warn),
-              const SizedBox(width: 6),
               Expanded(
                 child: Text(L10n.t('权限请求', 'Permission request'),
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: warn)),
+                    style: DshType.sStrong14.copyWith(color: c.warnLabel)),
               ),
-              InkWell(
+              DshIconButton(
+                icon: Icons.close,
+                size: DshSpace.controlSm,
+                iconSize: 16,
+                color: c.ink3,
+                tooltip: L10n.t('取消', 'Cancel'),
                 onTap: _busy ? null : widget.onCancel,
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Icon(Icons.close, size: 16, color: ink3),
-                ),
               ),
             ],
           ),
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              L10n.t('工具「${widget.request.toolName}」需要你的授权',
-                  'Tool “${widget.request.toolName}” needs your authorization'),
-              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-            ),
+          const SizedBox(height: DshSpace.sm),
+          DshBanner(
+            message: L10n.t('工具「${widget.request.toolName}」需要你的授权',
+                'Tool “${widget.request.toolName}” needs your authorization'),
+            icon: Icons.admin_panel_settings_outlined,
+            tone: DshBannerTone.warn,
           ),
           if (widget.request.reason != null && widget.request.reason!.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.only(top: DshSpace.sm),
               child: Text(
                 widget.request.reason!,
-                style: TextStyle(fontSize: 12.5, color: ink2, height: 1.45),
+                style: DshType.xs13.copyWith(color: c.ink2),
                 maxLines: 5,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+          const SizedBox(height: DshSpace.md),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              TextButton(
+              DshButton(
+                label: L10n.t('拒绝', 'Deny'),
+                variant: DshButtonVariant.outline,
+                size: DshButtonSize.sm,
                 onPressed: _busy ? null : () => _decide('rejected'),
-                child: Text(L10n.t('拒绝', 'Deny'), style: TextStyle(fontSize: 13.5, color: danger)),
               ),
-              const SizedBox(width: 4),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
-                  backgroundColor: warn,
-                ),
+              const SizedBox(width: DshSpace.sm),
+              DshButton(
+                label: _busy ? L10n.t('处理中…', 'Processing…') : L10n.t('允许一次', 'Allow once'),
+                variant: DshButtonVariant.primary,
+                size: DshButtonSize.sm,
                 onPressed: _busy ? null : () => _decide('allowed-once'),
-                child: Text(
-                    _busy ? L10n.t('处理中…', 'Processing…') : L10n.t('允许一次', 'Allow once'),
-                    style: const TextStyle(fontSize: 13.5)),
               ),
             ],
           ),

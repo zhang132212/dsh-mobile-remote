@@ -1,12 +1,20 @@
 // 模型提供商管理页（v2.6）：与 PC 端 设置→模型 同一配置通道。
-// 列表：搜索 + 已连接（卡片）/ 未配置（默认折叠紧凑行）；
+// 列表：搜索 + 已连接（官方设置卡片）/ 未配置（默认折叠紧凑行）；
 // 点击可编辑 baseURL / API Key / 模型目录 / 探测模型。
+//
+// 版式：搜索框（主题 R12 输入框）→ DshSectionHeader 分组 → DshCardGroup/ DshTile；
+// 编辑弹层用 showDshSheet + DshSheet（R28 面 + 按钮一律 DshButton）。
 import 'package:flutter/material.dart';
 import '../api.dart';
+import '../dsh_kit.dart';
 import '../l10n.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../toast.dart';
+
+/// 提供商首字母方块圆角：40×40 控件介于 sm(8) 与 md(12) 之间，取 10。
+/// （令牌阶梯无 10 档，这里用 sm + 2 派生，避免在页面里写死数字圆角。）
+const double _avatarRadius = DshRadius.tile;
 
 /// Phase 2：统一打开「模型提供商」管理页（设置页与模型弹层共用入口）。
 void openProviders(BuildContext context, AppStore store) {
@@ -72,72 +80,75 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Text(L10n.t('模型提供商', 'Model Providers'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-      ),
-      body: _error != null
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 32),
-                    child: Text('$_error', style: TextStyle(fontSize: 13, color: ink2, height: 1.5), textAlign: TextAlign.center),
-                  ),
-                  const SizedBox(height: 10),
-                  FilledButton(onPressed: _load, child: Text(L10n.t('重试', 'Retry'))),
-                ],
-              ),
+    return DshPage(
+      title: L10n.t('模型提供商', 'Model Providers'),
+      child: _error != null
+          ? DshError(
+              message: '$_error',
+              onRetry: _load,
+              retryLabel: L10n.t('重试', 'Retry'),
             )
           : _providers == null
-              ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
-                    children: [
-                      Text(
-                        L10n.t('与 PC 端「设置 → 模型」同一配置通道；手机修改即时生效，两端一致。', 'Same configuration channel as "Settings → Model" on the desktop; changes on your phone apply instantly on both ends.'),
-                        style: TextStyle(fontSize: 12, color: ink3, height: 1.5),
-                      ),
-                      const SizedBox(height: 10),
-                      // 搜索框
-                      TextField(
-                        controller: _searchCtrl,
-                        style: const TextStyle(fontSize: 14),
-                        onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
-                        decoration: InputDecoration(
-                          hintText: L10n.t('搜索提供商（名称 / ID）', 'Search providers (name / ID)'),
-                          hintStyle: TextStyle(fontSize: 13, color: ink3),
-                          prefixIcon: const Icon(Icons.search, size: 18),
-                          suffixIcon: _query.isEmpty
-                              ? null
-                              : IconButton(
-                                  icon: const Icon(Icons.close, size: 16),
-                                  onPressed: () {
-                                    _searchCtrl.clear();
-                                    setState(() => _query = '');
-                                  },
-                                ),
-                          isDense: true,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: line)),
-                          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: line)),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildSections(),
-                    ],
-                  ),
+              ? DshLoading(label: L10n.t('加载中…', 'Loading…'))
+              : RefreshIndicator(onRefresh: _load, child: _buildList()),
+    );
+  }
+
+  Widget _buildList() {
+    final c = DshPalette.of(context);
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(top: DshSpace.md, bottom: DshSpace.xxl),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: DshSpace.pageH),
+          child: Text(
+            L10n.t('与 PC 端「设置 → 模型」同一配置通道；手机修改即时生效，两端一致。', 'Same configuration channel as "Settings → Model" on the desktop; changes on your phone apply instantly on both ends.'),
+            style: DshType.xs13.copyWith(color: c.ink3),
+          ),
+        ),
+        const SizedBox(height: DshSpace.md),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: DshSpace.pageH),
+          child: SizedBox(
+            height: DshSpace.controlMd,
+            child: TextField(
+              controller: _searchCtrl,
+              textAlignVertical: TextAlignVertical.center,
+              style: DshType.s14.copyWith(color: c.ink),
+              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+                hintText: L10n.t('搜索提供商（名称 / ID）', 'Search providers (name / ID)'),
+                hintStyle: DshType.s14.copyWith(color: c.caption),
+                prefixIcon: Icon(Icons.search, size: 18, color: c.ink3),
+                prefixIconConstraints: const BoxConstraints(
+                  minWidth: DshSpace.controlMd,
+                  minHeight: DshSpace.controlMd,
+                  maxHeight: DshSpace.controlMd,
                 ),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : GestureDetector(
+                        onTap: () {
+                          _searchCtrl.clear();
+                          setState(() => _query = '');
+                        },
+                        child: Icon(Icons.close, size: 16, color: c.ink3),
+                      ),
+                suffixIconConstraints: const BoxConstraints(
+                  minWidth: DshSpace.controlMd,
+                  minHeight: DshSpace.controlMd,
+                  maxHeight: DshSpace.controlMd,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: DshSpace.xs),
+        _buildSections(),
+      ],
     );
   }
 
@@ -145,56 +156,75 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
     final all = _providers ?? [];
     final live = all.where((p) => p['dormant'] != true && _match(p, _query)).toList();
     final dormant = all.where((p) => p['dormant'] == true && _match(p, _query)).toList();
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
+    final c = DshPalette.of(context);
     if (live.isEmpty && dormant.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 40),
-        child: Center(child: Text(L10n.t('没有匹配的提供商', 'No matching providers'), style: TextStyle(fontSize: 13, color: ink3))),
+      return DshEmpty(
+        icon: Icons.search_off,
+        title: L10n.t('没有匹配的提供商', 'No matching providers'),
+        message: L10n.t(
+          '换个关键词，或确认电脑端已配置模型提供商。',
+          'Try another keyword, or make sure a provider is configured on the desktop.',
+        ),
+        compact: true,
       );
     }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (live.isNotEmpty) ...[
-          _sectionHeader('${L10n.t('已连接（', 'Connected (')}${live.length}${L10n.t('）', ')')}'),
-          for (final p in live) _ProviderCard(provider: p, onEdit: () => _openEditor(p)),
-          const SizedBox(height: 6),
+          DshSectionHeader(
+            '${L10n.t('已连接', 'Connected')} (${live.length})',
+          ),
+          DshCardGroup(
+            children: [
+              for (final p in live)
+                _ProviderRow(
+                  provider: p,
+                  active: true,
+                  onEdit: () => _openEditor(p),
+                ),
+            ],
+          ),
         ],
         if (dormant.isNotEmpty) ...[
-          // 未配置区：默认折叠
-          InkWell(
+          // 未配置区：默认折叠（点分组标题行展开/收起）
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onTap: () => setState(() => _dormantExpanded = !_dormantExpanded),
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
-              child: Row(
+            child: DshSectionHeader(
+              '${L10n.t('未配置', 'Not configured')} (${dormant.length})',
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(_dormantExpanded ? Icons.expand_more : Icons.expand_less, size: 18, color: ink2),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      '${L10n.t('未配置提供商（', 'Not configured (')}${dormant.length}${L10n.t('）', ')')}',
-                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: ink2),
-                    ),
+                  Text(
+                    _dormantExpanded
+                        ? L10n.t('收起', 'Collapse')
+                        : L10n.t('展开', 'Expand'),
+                    style: DshType.xs13.copyWith(color: c.ink3),
                   ),
-                  Text(_dormantExpanded ? L10n.t('收起', 'Collapse') : L10n.t('展开', 'Expand'), style: TextStyle(fontSize: 11.5, color: ink3)),
+                  const SizedBox(width: DshSpace.xs),
+                  Icon(
+                    _dormantExpanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16,
+                    color: c.ink3,
+                  ),
                 ],
               ),
             ),
           ),
           if (_dormantExpanded)
-            for (final p in dormant) _DormantRow(provider: p, onEdit: () => _openEditor(p)),
+            DshCardGroup(
+              children: [
+                for (final p in dormant)
+                  _ProviderRow(
+                    provider: p,
+                    active: false,
+                    onEdit: () => _openEditor(p),
+                  ),
+              ],
+            ),
         ],
       ],
-    );
-  }
-
-  Widget _sectionHeader(String text) {
-    final ink2 = DshColors.ink2(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(text, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: ink2)),
     );
   }
 
@@ -204,16 +234,15 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
       showToast(context, L10n.t('该提供商由内核内置，配置入口在 PC 端', 'This provider is built into the kernel; configure it on the desktop app.'));
       return;
     }
-    showModalBottomSheet(
+    final msgr = ScaffoldMessenger.of(context);
+    showDshSheet<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      // 键盘避让由 DshSheet 内置（MediaQuery.viewInsets），这里不再重复顶起。
       builder: (ctx) => _ProviderEditor(
         provider: p,
         onSaved: () {
           Navigator.of(ctx).pop();
-          showToast(context, L10n.t('已保存', 'Saved'));
+          showToastAt(msgr, L10n.t('已保存', 'Saved'));
           _load();
         },
       ),
@@ -221,123 +250,80 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
   }
 }
 
-/// 已连接提供商卡片（信息密度高：状态 / baseURL / 密钥 / 模型数）。
-class _ProviderCard extends StatelessWidget {
+/// 提供商行（官方设置行版式）：40×40 首字母方块 + 名称/摘要 + 状态标签。
+class _ProviderRow extends StatelessWidget {
+  const _ProviderRow({
+    required this.provider,
+    required this.active,
+    required this.onEdit,
+  });
+
   final Map<String, dynamic> provider;
+  final bool active;
   final VoidCallback onEdit;
-  const _ProviderCard({required this.provider, required this.onEdit});
 
   @override
   Widget build(BuildContext context) {
-    final ok = DshColors.ok(context);
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final surface = DshColors.surface(context);
+    final c = DshPalette.of(context);
     final baseURL = provider['baseURL'] as String?;
     final keyConfigured = provider['keyConfigured'] == true;
     final catalogModels = provider['catalogModels'] as List?;
+    final id = provider['id'] as String? ?? '';
+    final name = provider['name'] as String? ?? id;
     final subs = <String>[
-      provider['id'] as String? ?? '',
+      id,
       if (provider['id'] == 'deepseek-official')
         L10n.t('内置模型已可用，无需探测', 'Built-in models are ready; no probing needed'),
       if (baseURL != null && baseURL.isNotEmpty) baseURL,
       keyConfigured ? L10n.t('密钥已配置', 'API key set') : L10n.t('未设置密钥', 'No API key set'),
       if (catalogModels != null) '${L10n.t('目录 ', 'Catalog: ')}${catalogModels.length}${L10n.t(' 个模型', ' models')}',
     ];
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: surface,
-        border: Border.all(color: line),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
+    return DshTile(
+      leading: _ProviderAvatar(name: name, active: active),
+      title: name,
+      subtitle: subs.join(' · '),
+      onTap: onEdit,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        provider['name'] as String? ?? provider['id'] as String? ?? '',
-                        style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: ok.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(L10n.t('已连接', 'Connected'), style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: ok)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  subs.join(' · '),
-                  style: TextStyle(fontSize: 11.5, color: ink3, height: 1.45),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+          if (active)
+            DshTag(
+              label: L10n.t('已配置', 'Configured'),
+              color: c.ok,
+              background: c.okSoft,
+              dense: true,
             ),
-          ),
-          const SizedBox(width: 8),
-          InkWell(
-            onTap: onEdit,
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: Icon(Icons.edit_outlined, size: 18, color: ink2),
-            ),
-          ),
+          const SizedBox(width: DshSpace.sm),
+          Icon(Icons.edit_outlined, size: 18, color: c.ink2),
         ],
       ),
     );
   }
 }
 
-/// 未配置提供商紧凑行（状态点 + 名称 + ID）。
-class _DormantRow extends StatelessWidget {
-  final Map<String, dynamic> provider;
-  final VoidCallback onEdit;
-  const _DormantRow({required this.provider, required this.onEdit});
+/// 40×40 首字母方块：module 底 + 0.5px line4 发丝边（已配置用 okSoft 淡染）。
+class _ProviderAvatar extends StatelessWidget {
+  const _ProviderAvatar({required this.name, required this.active});
+
+  final String name;
+  final bool active;
 
   @override
   Widget build(BuildContext context) {
-    final warn = DshColors.warn(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    return InkWell(
-      onTap: onEdit,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: line.withValues(alpha: 0.5), width: 0.5)),
-        ),
-        child: Row(
-          children: [
-            Container(width: 8, height: 8, decoration: BoxDecoration(color: warn, shape: BoxShape.circle)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                provider['name'] as String? ?? provider['id'] as String? ?? '',
-                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Text(provider['id'] as String? ?? '', style: TextStyle(fontSize: 11.5, color: ink3)),
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right, size: 16, color: ink3),
-          ],
-        ),
+    final c = DshPalette.of(context);
+    final letter = name.isEmpty ? '?' : name.substring(0, 1).toUpperCase();
+    return Container(
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: active ? c.okSoft : c.module,
+        borderRadius: BorderRadius.circular(_avatarRadius),
+        border: Border.fromBorderSide(DshStroke.side(c.line4)),
+      ),
+      child: Text(
+        letter,
+        style: DshType.sStrong14.copyWith(color: active ? c.ok : c.ink2),
       ),
     );
   }
@@ -358,6 +344,7 @@ class _ProviderEditorState extends State<_ProviderEditor> {
   final _modelIdCtrl = TextEditingController();
   bool _busy = false;
   String? _status;
+  DshBannerTone _statusTone = DshBannerTone.info;
   List<Map<String, dynamic>>? _discovered;
   final List<Map<String, dynamic>> _models = [];
 
@@ -407,12 +394,16 @@ class _ProviderEditorState extends State<_ProviderEditor> {
     final hasStoredKey = widget.provider['keyConfigured'] == true;
     final err = _validBase(base);
     if (err != null) {
-      setState(() => _status = err);
+      setState(() {
+        _status = err;
+        _statusTone = DshBannerTone.danger;
+      });
       return;
     }
     setState(() {
       _busy = true;
       _status = L10n.t('探测中…', 'Probing…');
+      _statusTone = DshBannerTone.info;
       _discovered = null;
     });
     try {
@@ -425,6 +416,7 @@ class _ProviderEditorState extends State<_ProviderEditor> {
       setState(() {
         _discovered = models;
         _status = '${L10n.t('探测成功：', 'Probe succeeded: ')}${models.length}${L10n.t(' 个模型', ' models')}';
+        _statusTone = DshBannerTone.success;
       });
     } catch (e) {
       if (!mounted) return;
@@ -435,7 +427,10 @@ class _ProviderEditorState extends State<_ProviderEditor> {
             'DeepSeek 官方模型内置可用，无需探测。', 'This provider has a saved API key, but probe requests do not carry it — '
             'temporarily paste a valid key and retry; built-in DeepSeek models work without probing.')}\n$msg';
       }
-      setState(() => _status = '${L10n.t('探测失败：', 'Probe failed: ')}$msg');
+      setState(() {
+        _status = '${L10n.t('探测失败：', 'Probe failed: ')}$msg';
+        _statusTone = DshBannerTone.danger;
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -453,6 +448,7 @@ class _ProviderEditorState extends State<_ProviderEditor> {
     setState(() {
       _models.addAll(added);
       _status = added.isEmpty ? L10n.t('没有新模型（已全部在列表）', 'No new models (all are already in the list)') : '${L10n.t('已采用 ', 'Adopted ')}${added.length}${L10n.t(' 个模型', ' models')}';
+      _statusTone = added.isEmpty ? DshBannerTone.info : DshBannerTone.success;
     });
   }
 
@@ -460,17 +456,24 @@ class _ProviderEditorState extends State<_ProviderEditor> {
     final id = _modelIdCtrl.text.trim();
     final err = _validModelId(id);
     if (err != null) {
-      setState(() => _status = err);
+      setState(() {
+        _status = err;
+        _statusTone = DshBannerTone.danger;
+      });
       return;
     }
     if (_models.any((m) => m['id'] == id)) {
-      setState(() => _status = '${L10n.t('模型已存在：', 'Model already exists: ')}$id');
+      setState(() {
+        _status = '${L10n.t('模型已存在：', 'Model already exists: ')}$id';
+        _statusTone = DshBannerTone.warn;
+      });
       return;
     }
     setState(() {
       _models.add({'id': id, 'name': id});
       _modelIdCtrl.clear();
       _status = '${L10n.t('已添加：', 'Added: ')}$id';
+      _statusTone = DshBannerTone.success;
     });
   }
 
@@ -483,16 +486,23 @@ class _ProviderEditorState extends State<_ProviderEditor> {
     final base = _baseCtrl.text.trim();
     final err = _validBase(base);
     if (err != null) {
-      setState(() => _status = err);
+      setState(() {
+        _status = err;
+        _statusTone = DshBannerTone.danger;
+      });
       return;
     }
     if (_isPiAiStyle && _models.isEmpty) {
-      setState(() => _status = L10n.t('请至少添加一个模型（探测采用或手动输入模型 ID）', 'Please add at least one model (adopt from probe or enter a model ID manually)'));
+      setState(() {
+        _status = L10n.t('请至少添加一个模型（探测采用或手动输入模型 ID）', 'Please add at least one model (adopt from probe or enter a model ID manually)');
+        _statusTone = DshBannerTone.warn;
+      });
       return;
     }
     setState(() {
       _busy = true;
       _status = L10n.t('保存中…', 'Saving…');
+      _statusTone = DshBannerTone.info;
     });
     try {
       await api.saveLlmProvider(
@@ -508,7 +518,10 @@ class _ProviderEditorState extends State<_ProviderEditor> {
       widget.onSaved();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = '${L10n.t('保存失败：', 'Save failed: ')}$e');
+      setState(() {
+        _status = '${L10n.t('保存失败：', 'Save failed: ')}$e';
+        _statusTone = DshBannerTone.danger;
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -519,6 +532,7 @@ class _ProviderEditorState extends State<_ProviderEditor> {
     setState(() {
       _busy = true;
       _status = L10n.t('清除中…', 'Clearing…');
+      _statusTone = DshBannerTone.info;
     });
     try {
       await api.saveLlmProvider(
@@ -530,217 +544,214 @@ class _ProviderEditorState extends State<_ProviderEditor> {
       widget.onSaved();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _status = '${L10n.t('清除失败：', 'Clear failed: ')}$e');
+      setState(() {
+        _status = '${L10n.t('清除失败：', 'Clear failed: ')}$e';
+        _statusTone = DshBannerTone.danger;
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
+  /// 输入框统一外观：主题已给 R12 + line4 发丝边，这里只补字号与内衬。
+  InputDecoration _fieldDeco(String label, DshPalette c) => InputDecoration(
+        labelText: label,
+        labelStyle: DshType.xs13.copyWith(color: c.ink3),
+        floatingLabelStyle: DshType.xs13.copyWith(color: c.ink3),
+        hintStyle: DshType.s14.copyWith(color: c.caption),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: DshSpace.md,
+          vertical: DshSpace.md,
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
-    final ink = DshColors.ink(context);
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final surface = DshColors.surface(context);
-    final brand = DshColors.brand(context);
-    final danger = DshColors.danger(context);
+    final c = DshPalette.of(context);
     final p = widget.provider;
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Text(
-                  p['name'] as String? ?? p['id'] as String? ?? '',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(width: 8),
-                Text(p['id'] as String? ?? '', style: TextStyle(fontSize: 12, color: ink3)),
-              ],
+    final name = p['name'] as String? ?? p['id'] as String? ?? '';
+    final id = p['id'] as String? ?? '';
+    final existingIds = _models.map((m) => m['id']).toSet();
+
+    return DshSheet(
+      title: name,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(id, style: DshType.xs13.copyWith(color: c.ink3)),
+          const SizedBox(height: DshSpace.md),
+          TextField(
+            controller: _baseCtrl,
+            keyboardType: TextInputType.url,
+            style: DshType.s14.copyWith(color: c.ink),
+            decoration: _fieldDeco('baseURL', c).copyWith(
+              hintText: 'https://api.deepseek.com',
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _baseCtrl,
-              keyboardType: TextInputType.url,
-              style: const TextStyle(fontSize: 14),
-              decoration: InputDecoration(
-                labelText: 'baseURL',
-                hintText: 'https://api.deepseek.com',
-                labelStyle: TextStyle(fontSize: 13, color: ink3),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: line)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: line)),
-              ),
+          ),
+          const SizedBox(height: DshSpace.md),
+          TextField(
+            controller: _keyCtrl,
+            obscureText: true,
+            style: DshType.s14.copyWith(color: c.ink),
+            decoration: _fieldDeco(
+              p['keyConfigured'] == true
+                  ? L10n.t('API Key（已配置，留空不修改）', 'API Key (set — leave empty to keep)')
+                  : 'API Key',
+              c,
             ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _keyCtrl,
-              obscureText: true,
-              style: const TextStyle(fontSize: 14),
-              decoration: InputDecoration(
-                labelText: p['keyConfigured'] == true ? L10n.t('API Key（已配置，留空不修改）', 'API Key (set — leave empty to keep)') : 'API Key',
-                labelStyle: TextStyle(fontSize: 13, color: ink3),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: line)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: line)),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _busy ? null : _probe,
-                    child: Text(L10n.t('探测模型', 'Probe Models'), style: TextStyle(fontSize: 13)),
-                  ),
+          ),
+          const SizedBox(height: DshSpace.md),
+          Row(
+            children: [
+              Expanded(
+                child: DshButton(
+                  label: L10n.t('探测模型', 'Probe Models'),
+                  icon: Icons.radar,
+                  variant: DshButtonVariant.outline,
+                  onPressed: _busy ? null : _probe,
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: _busy ? null : _save,
-                    child: Text(L10n.t('保存', 'Save'), style: TextStyle(fontSize: 13)),
-                  ),
-                ),
-              ],
-            ),
-            if (p['keyConfigured'] == true) ...[
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: _busy ? null : _removeKey,
-                child: Text(L10n.t('清除已存密钥', 'Clear saved key'), style: TextStyle(fontSize: 12.5, color: danger)),
               ),
-            ],
-            if (_status != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(_status!, style: TextStyle(fontSize: 12, color: ink2, height: 1.4)),
-              ),
-            if (_discovered != null && _discovered!.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(L10n.t('探测到的模型：', 'Discovered models:'), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: ink)),
-                  ),
-                  TextButton(
-                    onPressed: _busy ? null : _adoptAll,
-                    child: Text(L10n.t('全部采用', 'Adopt All'), style: TextStyle(fontSize: 12)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: surface,
-                  border: Border.all(color: line),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    for (final m in _discovered!)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            Icon(Icons.smart_toy_outlined, size: 14, color: brand),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                (m['name'] as String? ?? m['id'] as String? ?? '').toString(),
-                                style: const TextStyle(fontSize: 12.5),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Text(m['id'] as String? ?? '', style: TextStyle(fontSize: 11, color: ink3)),
-                          ],
-                        ),
-                      ),
-                  ],
+              const SizedBox(width: DshSpace.sm),
+              Expanded(
+                child: DshButton(
+                  label: L10n.t('保存', 'Save'),
+                  icon: Icons.check,
+                  onPressed: _busy ? null : _save,
                 ),
               ),
             ],
-            const SizedBox(height: 12),
-            Text('${L10n.t('模型目录（', 'Model catalog (')}${_models.length}${L10n.t('）', ')')}', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: ink)),
-            const SizedBox(height: 6),
+          ),
+          if (p['keyConfigured'] == true) ...[
+            const SizedBox(height: DshSpace.sm),
+            DshButton(
+              label: L10n.t('清除已存密钥', 'Clear saved key'),
+              icon: Icons.key_off_outlined,
+              variant: DshButtonVariant.ghost,
+              size: DshButtonSize.sm,
+              onPressed: _busy ? null : _removeKey,
+            ),
+          ],
+          if (_busy) ...[
+            const SizedBox(height: DshSpace.md),
+            DshLoading(label: L10n.t('正在与提供商通信…', 'Talking to the provider…')),
+          ] else if (_status != null) ...[
+            const SizedBox(height: DshSpace.md),
+            DshBanner(
+              message: _status!,
+              tone: _statusTone,
+              icon: switch (_statusTone) {
+                DshBannerTone.success => Icons.check_circle_outline,
+                DshBannerTone.danger => Icons.error_outline,
+                DshBannerTone.warn => Icons.warning_amber_outlined,
+                DshBannerTone.info => Icons.info_outline,
+              },
+            ),
+          ],
+          if (_discovered != null && _discovered!.isNotEmpty) ...[
+            const SizedBox(height: DshSpace.lg),
             Row(
               children: [
                 Expanded(
+                  child: Text(
+                    '${L10n.t('探测到的模型', 'Discovered models')} (${_discovered!.length})',
+                    style: DshType.xsStrong13.copyWith(color: c.ink3),
+                  ),
+                ),
+                DshButton(
+                  label: L10n.t('全部采用', 'Adopt All'),
+                  icon: Icons.playlist_add_check,
+                  size: DshButtonSize.sm,
+                  variant: DshButtonVariant.ghost,
+                  onPressed: _busy ? null : _adoptAll,
+                ),
+              ],
+            ),
+            const SizedBox(height: DshSpace.sm),
+            DshCardGroup(
+              margin: EdgeInsets.zero,
+              children: [
+                for (final m in _discovered!)
+                  DshTile(
+                    dense: true,
+                    leading: const Icon(Icons.smart_toy_outlined),
+                    title: (m['name'] as String? ?? m['id'] as String? ?? '').toString(),
+                    subtitle: m['id'] as String? ?? '',
+                    trailing: existingIds.contains(m['id'])
+                        ? Icon(Icons.check, size: 16, color: c.brand)
+                        : null,
+                  ),
+              ],
+            ),
+          ],
+          const SizedBox(height: DshSpace.lg),
+          Text(
+            '${L10n.t('模型目录', 'Model catalog')} (${_models.length})',
+            style: DshType.xsStrong13.copyWith(color: c.ink3),
+          ),
+          const SizedBox(height: DshSpace.sm),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: DshSpace.controlMd,
                   child: TextField(
                     controller: _modelIdCtrl,
-                    style: const TextStyle(fontSize: 13.5),
+                    textAlignVertical: TextAlignVertical.center,
+                    style: DshType.s14.copyWith(color: c.ink),
                     decoration: InputDecoration(
-                      hintText: L10n.t('手动输入模型 ID', 'Enter a model ID manually'),
-                      hintStyle: TextStyle(fontSize: 12.5, color: ink3),
                       isDense: true,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: line)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: line)),
+                      contentPadding: EdgeInsets.zero,
+                      hintText: L10n.t('手动输入模型 ID', 'Enter a model ID manually'),
+                      hintStyle: DshType.s14.copyWith(color: c.caption),
+                      prefixIcon: Icon(Icons.tag, size: 16, color: c.ink3),
+                      prefixIconConstraints: const BoxConstraints(
+                        minWidth: DshSpace.controlMd,
+                        minHeight: DshSpace.controlMd,
+                        maxHeight: DshSpace.controlMd,
+                      ),
                     ),
                     onSubmitted: (_) => _addModel(),
                   ),
                 ),
-                const SizedBox(width: 8),
-                OutlinedButton(
-                  onPressed: _addModel,
-                  child: Text(L10n.t('添加', 'Add'), style: TextStyle(fontSize: 12.5)),
-                ),
+              ),
+              const SizedBox(width: DshSpace.sm),
+              DshButton(
+                label: L10n.t('添加', 'Add'),
+                size: DshButtonSize.sm,
+                variant: DshButtonVariant.outline,
+                onPressed: _addModel,
+              ),
+            ],
+          ),
+          const SizedBox(height: DshSpace.sm),
+          if (_models.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: DshSpace.xs),
+              child: Text(
+                L10n.t('未添加模型', 'No models added'),
+                style: DshType.xs13.copyWith(color: c.ink3),
+              ),
+            )
+          else
+            DshCardGroup(
+              margin: EdgeInsets.zero,
+              children: [
+                for (final m in _models)
+                  DshTile(
+                    dense: true,
+                    leading: const Icon(Icons.model_training_outlined),
+                    title: (m['name'] as String? ?? m['id'] as String? ?? '').toString(),
+                    subtitle: m['id'] as String? ?? '',
+                    trailing: DshIconButton(
+                      icon: Icons.close,
+                      iconSize: 16,
+                      onTap: () => _removeModel(m['id'] as String? ?? ''),
+                    ),
+                  ),
               ],
             ),
-            if (_models.isEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(L10n.t('未添加模型', 'No models added'), style: TextStyle(fontSize: 11.5, color: ink3)),
-              )
-            else
-              Container(
-                margin: const EdgeInsets.only(top: 6),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: surface,
-                  border: Border.all(color: line),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    for (final m in _models)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            Icon(Icons.model_training, size: 14, color: brand),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                (m['name'] as String? ?? m['id'] as String? ?? '').toString(),
-                                style: const TextStyle(fontSize: 12.5),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Text(m['id'] as String? ?? '', style: TextStyle(fontSize: 11, color: ink3)),
-                            InkWell(
-                              onTap: () => _removeModel(m['id'] as String? ?? ''),
-                              borderRadius: BorderRadius.circular(6),
-                              child: Padding(
-                                padding: const EdgeInsets.all(4),
-                                child: Icon(Icons.close, size: 14, color: ink3),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-          ],
-        ),
+        ],
       ),
     );
   }

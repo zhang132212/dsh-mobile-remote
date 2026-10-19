@@ -65,10 +65,26 @@ void _expectRowsRectangular(WidgetTester tester) {
 
 Rect _r(WidgetTester tester, String text) => tester.getRect(find.text(text));
 
-/// 不变量 2：同一列的文本 x 起点一致。
+/// 文本所在单元格的左边界。
+///
+/// 不变量 2 关心的是**列网格**是否对齐（错位会让列分隔线成阶梯）。
+/// 行内代码现在渲染成带内衬的圆角底片（官方样式），以代码开头的单元格里
+/// 文字本身会比单元格左边界内缩 4px——那是刻意的内衬，不是网格错位。
+/// 所以这里比对单元格左边界，而不是文字左边界。
+double _cellLeftOf(WidgetTester tester, String text) {
+  final cell = find.ancestor(
+    of: find.text(text),
+    matching: find.byWidgetPredicate(_isCell),
+  );
+  expect(cell, findsWidgets, reason: '文本 "$text" 不在表格单元格内，断言本身失效');
+  return tester.getRect(cell.first).left;
+}
+
+/// 不变量 2：同一列的单元格 x 起点一致。
 void _expectSameColumnX(WidgetTester tester, List<String> column) {
-  final xs = column.map((t) => _r(tester, t).left).toSet();
-  expect(xs.length, 1, reason: '同一列 x 起点不一致 → 阶梯错位：$column -> $xs');
+  final xs = column.map((t) => _cellLeftOf(tester, t)).toSet();
+  expect(xs.length, 1,
+      reason: '同一列 x 起点不一致 → 阶梯错位：$column -> $xs');
 }
 
 /// 异构内容：加粗 / 行内代码 / 链接 / 中文 / 数字，宽度与行高差异都很大。

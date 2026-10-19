@@ -28,9 +28,15 @@ final y = 2;
 final _longProseSample =
     '````markdown\n${List.generate(23, (i) => '- 第 $i 行正文').join('\n')}\n````\n';
 
-/// 代码卡片内的文本（代码块以 monospace Text 呈现；用于区分「代码卡片」与行内富文本）。
+/// 代码卡片内的文本（代码块以等宽 Text 呈现；用于区分「代码卡片」与行内富文本）。
+/// 等宽判定同时接受字面 `monospace` 与 DshType 的等宽回退栈，避免锁死实现细节。
 Finder _codeCardText([String? contains]) => find.byWidgetPredicate(
-      (w) => w is Text && w.style?.fontFamily == 'monospace' && (contains == null || (w.data ?? '').contains(contains)),
+      (w) =>
+          w is Text &&
+          (w.style?.fontFamily == 'monospace' ||
+              (w.style?.fontFamilyFallback?.contains('JetBrains Mono') ??
+                  false)) &&
+          (contains == null || (w.data ?? '').contains(contains)),
     );
 
 /// 普通三反引号 + 17 行代码（触发「代码 · N 行 · 可滚动查看」文案）。

@@ -1,8 +1,9 @@
 // 通知中心页（对齐网页端 notifications screen）
-// 布局：SafeArea 避开状态栏；紧凑卡片；未读蓝点；三色图标层级；浅色分隔线。
+// 布局：官方标题栏 + 单行列表（状态图标 / 标题 / 详情 / 右侧时间）；未读用状态点。
 // 删除：长按单条删除；右上角垃圾桶 → 批量多选删除 / 清空全部（插件端 /notifications/delete）。
 import 'package:flutter/material.dart';
 import '../l10n.dart';
+import '../dsh_kit.dart';
 import '../toast.dart';
 import '../api.dart';
 import '../models.dart';
@@ -145,30 +146,28 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
-  /// 长按单条 → 删除该条。
+  /// 长按单条 → 删除该条（官方底部弹层）。
   void _confirmDeleteOne(AppNotification n) {
-    showModalBottomSheet<void>(
+    showDshSheet<void>(
       context: context,
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => DshSheet(
+        title: n.title,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ListTile(
-              title: Text(n.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-              dense: true,
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: Icon(Icons.delete_outline, color: DshColors.danger(context)),
-              title: Text(L10n.t('删除这条通知', 'Delete this notification'), style: TextStyle(color: DshColors.danger(context), fontSize: 15)),
+            DshTile(
+              leading: const Icon(Icons.delete_outline),
+              title: L10n.t('删除这条通知', 'Delete this notification'),
+              danger: true,
               onTap: () {
                 Navigator.of(ctx).pop();
                 _delete(ids: [n.id]);
               },
             ),
-            ListTile(
-              leading: Icon(Icons.close, color: DshColors.ink3(context)),
-              title: Text(L10n.t('取消', 'Cancel'), style: const TextStyle(fontSize: 15)),
+            DshTile(
+              leading: const Icon(Icons.close),
+              title: L10n.t('取消', 'Cancel'),
               onTap: () => Navigator.of(ctx).pop(),
             ),
           ],
@@ -179,32 +178,33 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   /// 右上角垃圾桶 → 批量多选 / 清空全部。
   void _showDeleteMenu() {
-    showModalBottomSheet<void>(
+    showDshSheet<void>(
       context: context,
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => DshSheet(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ListTile(
-              leading: Icon(Icons.checklist, color: DshColors.ink2(context)),
-              title: Text(L10n.t('批量删除…', 'Batch delete…'), style: const TextStyle(fontSize: 15)),
+            DshTile(
+              leading: const Icon(Icons.checklist),
+              title: L10n.t('批量删除…', 'Batch delete…'),
               onTap: () {
                 Navigator.of(ctx).pop();
                 setState(() => _selecting = true);
               },
             ),
-            const Divider(height: 1),
-            ListTile(
-              leading: Icon(Icons.delete_sweep_outlined, color: DshColors.danger(context)),
-              title: Text(L10n.t('清空全部通知', 'Clear all notifications'), style: TextStyle(color: DshColors.danger(context), fontSize: 15)),
+            DshTile(
+              leading: const Icon(Icons.delete_sweep_outlined),
+              title: L10n.t('清空全部通知', 'Clear all notifications'),
+              danger: true,
               onTap: () {
                 Navigator.of(ctx).pop();
                 _confirmClearAll();
               },
             ),
-            ListTile(
-              leading: Icon(Icons.close, color: DshColors.ink3(context)),
-              title: Text(L10n.t('取消', 'Cancel'), style: const TextStyle(fontSize: 15)),
+            DshTile(
+              leading: const Icon(Icons.close),
+              title: L10n.t('取消', 'Cancel'),
               onTap: () => Navigator.of(ctx).pop(),
             ),
           ],
@@ -213,20 +213,34 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
+  /// 确认对话框：面/圆角/文字走 dialogTheme（R28 + 发丝边），按钮用官方按钮。
   void _confirmClearAll() {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(L10n.t('清空全部通知', 'Clear all notifications'), style: const TextStyle(fontSize: 16)),
-        content: Text(L10n.t('将删除全部通知记录，此操作不可恢复。', 'All notification records will be deleted. This cannot be undone.'), style: const TextStyle(fontSize: 14)),
+        title: Text(L10n.t('清空全部通知', 'Clear all notifications')),
+        content: Text(L10n.t('将删除全部通知记录，此操作不可恢复。', 'All notification records will be deleted. This cannot be undone.')),
+        actionsPadding: const EdgeInsets.fromLTRB(
+          DshSpace.xxl,
+          DshSpace.md,
+          DshSpace.xxl,
+          DshSpace.xl,
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text(L10n.t('取消', 'Cancel'))),
-          TextButton(
+          DshButton(
+            label: L10n.t('取消', 'Cancel'),
+            variant: DshButtonVariant.ghost,
+            size: DshButtonSize.md,
+            onPressed: () => Navigator.of(ctx).pop(),
+          ),
+          DshButton(
+            label: L10n.t('清空', 'Clear'),
+            variant: DshButtonVariant.danger,
+            size: DshButtonSize.md,
             onPressed: () {
               Navigator.of(ctx).pop();
               _delete(all: true);
             },
-            child: Text(L10n.t('清空', 'Clear'), style: TextStyle(color: DshColors.danger(context))),
           ),
         ],
       ),
@@ -239,16 +253,29 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(L10n.t('删除所选通知', 'Delete selected notifications'), style: const TextStyle(fontSize: 16)),
-        content: Text('${L10n.t('将删除选中的 ', 'Delete the selected ')}$n${L10n.t(' 条通知记录，此操作不可恢复。', ' notification records. This cannot be undone.')}', style: const TextStyle(fontSize: 14)),
+        title: Text(L10n.t('删除所选通知', 'Delete selected notifications')),
+        content: Text('${L10n.t('将删除选中的 ', 'Delete the selected ')}$n${L10n.t(' 条通知记录，此操作不可恢复。', ' notification records. This cannot be undone.')}'),
+        actionsPadding: const EdgeInsets.fromLTRB(
+          DshSpace.xxl,
+          DshSpace.md,
+          DshSpace.xxl,
+          DshSpace.xl,
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text(L10n.t('取消', 'Cancel'))),
-          TextButton(
+          DshButton(
+            label: L10n.t('取消', 'Cancel'),
+            variant: DshButtonVariant.ghost,
+            size: DshButtonSize.md,
+            onPressed: () => Navigator.of(ctx).pop(),
+          ),
+          DshButton(
+            label: L10n.t('删除', 'Delete'),
+            variant: DshButtonVariant.danger,
+            size: DshButtonSize.md,
             onPressed: () {
               Navigator.of(ctx).pop();
               _delete(ids: _selected.toList());
             },
-            child: Text(L10n.t('删除', 'Delete'), style: TextStyle(color: DshColors.danger(context))),
           ),
         ],
       ),
@@ -267,52 +294,48 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context);
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final brandSoft = DshColors.brandSoft(context);
-    final brand = DshColors.brand(context);
-    final ok = DshColors.ok(context);
-    final danger = DshColors.danger(context);
-    final warn = DshColors.warn(context);
+    final c = DshPalette.of(context);
     final unreadCount = _items.where((n) => n.unread).length;
     final allSelected = _selecting && _selected.length == _items.length;
 
     return Scaffold(
-      backgroundColor: scheme.scaffoldBackgroundColor,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Text(_selecting ? '${L10n.t('已选 ', 'Selected ')}${_selected.length}${L10n.t(' 条', '')}' : L10n.t('通知', 'Notifications'),
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+      backgroundColor: c.bg,
+      appBar: DshAppBar(
+        title: _selecting
+            ? '${L10n.t('已选 ', 'Selected ')}${_selected.length}${L10n.t(' 条', '')}'
+            : L10n.t('通知', 'Notifications'),
         actions: [
           if (_selecting)
-            TextButton(
+            DshButton(
+              label: allSelected ? L10n.t('取消全选', 'Deselect all') : L10n.t('全选', 'Select all'),
+              variant: DshButtonVariant.ghost,
+              size: DshButtonSize.sm,
               onPressed: _toggleSelectAll,
-              child: Text(allSelected ? L10n.t('取消全选', 'Deselect all') : L10n.t('全选', 'Select all'), style: TextStyle(fontSize: 13, color: brand)),
             ),
           if (_selecting)
-            TextButton(
+            DshButton(
+              label: L10n.t('完成', 'Done'),
+              variant: DshButtonVariant.ghost,
+              size: DshButtonSize.sm,
               onPressed: () => setState(() {
                 _selecting = false;
                 _selected.clear();
               }),
-              child: Text(L10n.t('完成', 'Done'), style: TextStyle(fontSize: 13, color: ink2)),
             ),
           if (!_selecting && unreadCount > 0)
-            TextButton(
+            DshButton(
+              label: L10n.t('全部已读', 'Mark all read'),
+              variant: DshButtonVariant.ghost,
+              size: DshButtonSize.sm,
               onPressed: _readAll,
-              child: Text(L10n.t('全部已读', 'Mark all read'), style: TextStyle(fontSize: 13, color: brand)),
             ),
           if (!_selecting && _loaded && _items.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.delete_outline, size: 20),
-              onPressed: _showDeleteMenu,
+            DshIconButton(
+              icon: Icons.delete_outline,
+              tooltip: L10n.t('删除', 'Delete'),
+              onTap: _showDeleteMenu,
             ),
-          const SizedBox(width: 8),
+          const SizedBox(width: DshSpace.sm),
         ],
       ),
       body: SafeArea(
@@ -321,148 +344,127 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           children: [
             Expanded(
               child: _loaded && _items.isEmpty
-                  ? Center(
-                      // v2.9.0 review(M5)：错误态与空态区分；点按重试
-                      child: InkWell(
-                        onTap: _refresh,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Text(
-                            _error
-                                ? L10n.t('通知加载失败，点按重试', 'Failed to load notifications — tap to retry')
-                                : L10n.t('暂无通知', 'No notifications'),
-                            style: TextStyle(fontSize: 13, color: _error ? DshColors.danger(context) : ink3),
-                          ),
-                        ),
-                      ),
+                  // v2.9.0 review(M5)：错误态与空态区分；错误态给重试入口
+                  ? DshEmpty(
+                      icon: _error ? Icons.cloud_off_outlined : Icons.notifications_none,
+                      title: _error
+                          ? L10n.t('通知加载失败', 'Failed to load notifications')
+                          : L10n.t('暂无通知', 'No notifications'),
+                      message: _error ? L10n.t('请检查与电脑的连接后重试', 'Check the connection to your PC and retry') : null,
+                      action: _error
+                          ? DshButton(
+                              label: L10n.t('重试', 'Retry'),
+                              variant: DshButtonVariant.outline,
+                              size: DshButtonSize.sm,
+                              onPressed: _refresh,
+                            )
+                          : null,
+                      compact: true,
                     )
                   : RefreshIndicator(
                       onRefresh: _refresh,
-                      child: ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(16, 2, 16, 16),
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(
+                          DshSpace.sm,
+                          DshSpace.xs,
+                          DshSpace.sm,
+                          DshSpace.xl,
+                        ),
                         itemCount: _items.length,
-                        separatorBuilder: (_, _) =>
-                            SizedBox(height: 8, child: Divider(height: 1, color: line.withValues(alpha: 0.5))),
-                        itemBuilder: (context, i) {
-                          final n = _items[i];
-                          final (icon, color, bg) = switch (n.kind) {
-                            'completed' => (Icons.check_circle_outline, ok, ok.withValues(alpha: 0.12)),
-                            'failed' => (Icons.error_outline, danger, danger.withValues(alpha: 0.12)),
-                            _ => (Icons.warning_amber_rounded, warn, warn.withValues(alpha: 0.12)),
-                          };
-                          final dt = DateTime.fromMillisecondsSinceEpoch(n.time).toLocal();
-                          final tm = '${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
-                              '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-                          final selected = _selected.contains(n.id);
-                          return Material(
-                            color: selected
-                                ? brandSoft
-                                : n.unread
-                                    ? brandSoft
-                                    : Colors.transparent,
-                            borderRadius: BorderRadius.circular(10),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(10),
-                              onTap: () => _open(n),
-                              onLongPress: _selecting
-                                  ? null
-                                  : () => _confirmDeleteOne(n),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (_selecting) ...[
-                                      Icon(
-                                        selected ? Icons.check_circle : Icons.circle_outlined,
-                                        size: 19,
-                                        color: selected ? brand : ink3,
-                                      ),
-                                      const SizedBox(width: 10),
-                                    ],
-                                    Container(
-                                      width: 32,
-                                      height: 32,
-                                      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(9)),
-                                      child: Icon(icon, size: 17, color: color),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            n.title,
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: n.unread ? FontWeight.w600 : FontWeight.w500,
-                                              color: scheme.colorScheme.onSurface,
-                                            ),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          if (n.detail.isNotEmpty) ...[
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              n.detail,
-                                              style: TextStyle(fontSize: 12, color: ink2, height: 1.4),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ],
-                                          const SizedBox(height: 3),
-                                          Text(tm, style: TextStyle(fontSize: 11, color: ink3)),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    // 未读蓝点
-                                    Container(
-                                      width: 8,
-                                      height: 8,
-                                      margin: const EdgeInsets.only(top: 5),
-                                      decoration: BoxDecoration(
-                                        color: n.unread ? brand : Colors.transparent,
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        },
+                        itemBuilder: (context, i) => _notificationRow(context, _items[i], c),
                       ),
                     ),
             ),
             // 批量删除底部操作条
             if (_selecting)
-              SafeArea(
-                top: false,
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-                  decoration: BoxDecoration(
-                    color: scheme.scaffoldBackgroundColor,
-                    border: Border(top: BorderSide(color: line)),
-                  ),
-                  child: Row(
-                    children: [
-                      Text('${L10n.t('已选 ', 'Selected ')}${_selected.length}${L10n.t(' 条', '')}', style: TextStyle(fontSize: 13, color: ink2)),
-                      const Spacer(),
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: danger,
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: c.bg,
+                  border: Border(top: DshStroke.side(c.line2)),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      DshSpace.pageH,
+                      DshSpace.sm,
+                      DshSpace.pageH,
+                      DshSpace.sm,
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '${L10n.t('已选 ', 'Selected ')}${_selected.length}${L10n.t(' 条', '')}',
+                          style: DshType.xs13.copyWith(color: c.ink2),
                         ),
-                        onPressed: _selected.isEmpty || _deleting ? null : _confirmDeleteSelected,
-                        child: Text(_deleting ? L10n.t('删除中…', 'Deleting…') : L10n.t('删除所选', 'Delete selected'), style: const TextStyle(fontSize: 14)),
-                      ),
-                    ],
+                        const Spacer(),
+                        // 删除动作统一 danger
+                        DshButton(
+                          label: _deleting ? L10n.t('删除中…', 'Deleting…') : L10n.t('删除所选', 'Delete selected'),
+                          variant: DshButtonVariant.danger,
+                          size: DshButtonSize.md,
+                          onPressed: _selected.isEmpty || _deleting ? null : _confirmDeleteSelected,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 通知行：leading 状态图标 + 标题 + 详情 + 右侧时间（xxs12/caption）。
+  /// 多选态铺 navAccent 底；未读用业务蓝点（不脉冲）。
+  Widget _notificationRow(BuildContext context, AppNotification n, DshPalette c) {
+    final (icon, color) = switch (n.kind) {
+      'completed' => (Icons.check_circle_outline, c.ok),
+      'failed' => (Icons.error_outline, c.danger),
+      _ => (Icons.warning_amber_rounded, c.warn),
+    };
+    final dt = DateTime.fromMillisecondsSinceEpoch(n.time).toLocal();
+    final tm = '${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    final selected = _selected.contains(n.id);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DshSpace.xxs),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: _selecting && selected ? c.navAccent : Colors.transparent,
+          borderRadius: DshRadius.rMd,
+        ),
+        child: DshTile(
+          leading: _selecting
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DshIconButton(
+                      icon: selected ? Icons.check_circle : Icons.circle_outlined,
+                      selected: selected,
+                      iconSize: 20,
+                    ),
+                    const SizedBox(width: DshSpace.sm),
+                    Icon(icon, color: color),
+                  ],
+                )
+              : Icon(icon, color: color),
+          title: n.title,
+          subtitle: n.detail.isNotEmpty ? n.detail : null,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(tm, style: DshType.xxs12.copyWith(color: c.caption)),
+              if (n.unread) ...[
+                const SizedBox(width: DshSpace.sm),
+                DshStatusDot(color: c.business, pulse: false),
+              ],
+            ],
+          ),
+          onTap: () => _open(n),
+          onLongPress: _selecting ? null : () => _confirmDeleteOne(n),
         ),
       ),
     );

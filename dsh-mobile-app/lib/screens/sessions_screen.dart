@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../l10n.dart';
+import '../dsh_kit.dart';
 import '../toast.dart';
 import '../api.dart';
 import '../models.dart';
@@ -49,34 +50,29 @@ class _SessionsScreenState extends State<SessionsScreen> {
 
   Future<void> _showActions(Session s) async {
     final isArchived = s.archived;
-    final action = await showModalBottomSheet<String>(
+    final action = await showDshSheet<String>(
       context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => SafeArea(
+      builder: (ctx) => DshSheet(
+        title: s.label,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
-              child: Text(
-                s.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.chat_bubble_outline, size: 20),
-              title: Text(L10n.t('打开', 'Open'), style: const TextStyle(fontSize: 14)),
+            DshTile(
+              leading: const Icon(Icons.chat_bubble_outline),
+              title: L10n.t('打开', 'Open'),
               onTap: () => Navigator.of(ctx).pop('open'),
             ),
-            ListTile(
-              leading: Icon(isArchived ? Icons.unarchive_outlined : Icons.archive_outlined, size: 20),
-              title: Text(isArchived ? L10n.t('恢复（取消归档）', 'Restore (unarchive)') : L10n.t('归档该会话', 'Archive this session'), style: const TextStyle(fontSize: 14)),
+            DshTile(
+              leading: Icon(isArchived ? Icons.unarchive_outlined : Icons.archive_outlined),
+              title: isArchived ? L10n.t('恢复（取消归档）', 'Restore (unarchive)') : L10n.t('归档该会话', 'Archive this session'),
               onTap: () => Navigator.of(ctx).pop(isArchived ? 'unarchive' : 'archive'),
             ),
-            const SizedBox(height: 6),
+            DshTile(
+              leading: const Icon(Icons.close),
+              title: L10n.t('取消', 'Cancel'),
+              onTap: () => Navigator.of(ctx).pop(),
+            ),
           ],
         ),
       ),
@@ -106,130 +102,128 @@ class _SessionsScreenState extends State<SessionsScreen> {
   Widget build(BuildContext context) {
     final store = widget.store;
     final sessions = _showArchived ? store.archivedSessions : store.activeSessions;
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final brand = DshColors.brand(context);
+    final c = DshPalette.of(context);
 
     return Column(
       children: [
         // 工作区筛选（≥2 个工作区时显示，对齐 PC 端快速切换）
-        if (store.workspaces.length >= 2)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
-            child: Align(
-              // 左对齐：与下方"活跃/已归档"行一致（默认 Column 居中导致观感怪异）
-              alignment: Alignment.centerLeft,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _FilterChip(
-                      label: L10n.t('全部', 'All'),
-                      selected: store.workspacePath == null,
-                      onTap: () => store.setWorkspace(null),
-                    ),
-                    for (final w in store.workspaces) ...[
-                      const SizedBox(width: 8),
-                      _FilterChip(
-                        label: (w['title'] as String?) ?? (w['path'] as String? ?? ''),
-                        // v3.1.1(issue #5)：原始路径做展示，规范化后与 workspacePath（归一存储）匹配
-                        selected: store.workspacePath == AppStore.normPath(w['path'] as String? ?? ''),
-                        onTap: () => store.setWorkspace(w['path'] as String?),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
+        if (store.workspaces.length >= 2) ...[
+          DshSectionHeader(
+            L10n.t('工作区', 'Workspaces'),
+            padding: const EdgeInsets.fromLTRB(
+              DshSpace.pageH,
+              DshSpace.md,
+              DshSpace.pageH,
+              DshSpace.sm,
             ),
           ),
-        // 活跃 / 已归档 筛选
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: DshSpace.pageH),
+            child: Row(
+              children: [
+                _FilterChip(
+                  label: L10n.t('全部', 'All'),
+                  selected: store.workspacePath == null,
+                  onTap: () => store.setWorkspace(null),
+                ),
+                for (final w in store.workspaces) ...[
+                  const SizedBox(width: DshSpace.sm),
+                  _FilterChip(
+                    label: (w['title'] as String?) ?? (w['path'] as String? ?? ''),
+                    // v3.1.1(issue #5)：原始路径做展示，规范化后与 workspacePath（归一存储）匹配
+                    selected: store.workspacePath == AppStore.normPath(w['path'] as String? ?? ''),
+                    onTap: () => store.setWorkspace(w['path'] as String?),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+        // 活跃 / 已归档 分段控件
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
-          child: Row(
-            children: [
-              _FilterChip(
-                label: '${L10n.t('活跃', 'Active')} ${store.activeSessions.length}',
-                selected: !_showArchived,
-                onTap: () => setState(() => _showArchived = false),
-              ),
-              const SizedBox(width: 8),
-              _FilterChip(
-                label: '${L10n.t('已归档', 'Archived')} ${store.archivedSessions.length}',
-                selected: _showArchived,
-                onTap: () => setState(() => _showArchived = true),
-              ),
+          padding: const EdgeInsets.fromLTRB(
+            DshSpace.pageH,
+            DshSpace.md,
+            DshSpace.pageH,
+            DshSpace.sm,
+          ),
+          child: DshSegmented(
+            items: [
+              '${L10n.t('活跃', 'Active')} ${store.activeSessions.length}',
+              '${L10n.t('已归档', 'Archived')} ${store.archivedSessions.length}',
             ],
+            index: _showArchived ? 1 : 0,
+            onChanged: (i) => setState(() => _showArchived = i == 1),
           ),
         ),
-        if (_showArchived && store.archivedSessions.isEmpty)
-          Expanded(
-            child: Center(child: Text(L10n.t('暂无归档会话', 'No archived sessions'), style: TextStyle(fontSize: 13, color: ink3))),
-          )
-        else
-          Expanded(
-            child: sessions.isEmpty
-                ? Center(
-                    child: Text(L10n.t('暂无会话', 'No sessions'), style: TextStyle(fontSize: 13, color: ink3)),
+        Expanded(
+          // 会话列表是"侧栏类列表"：底色用 sidebar，行靠 R12 选中/hover 底分层
+          child: ColoredBox(
+            color: c.sidebar,
+            child: _showArchived && store.archivedSessions.isEmpty
+                ? DshEmpty(
+                    icon: Icons.archive_outlined,
+                    title: L10n.t('暂无归档会话', 'No archived sessions'),
+                    compact: true,
                   )
-                : RefreshIndicator(
-                  onRefresh: () => widget.store.refreshSessions(),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    itemCount: sessions.length,
-                    separatorBuilder: (_, _) => Divider(height: 1, color: line),
-                    itemBuilder: (context, i) {
-                      final s = sessions[i];
-                      return InkWell(
-                        onTap: () => _open(s),
-                        onLongPress: () => _showActions(s),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 2),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 30,
-                                height: 30,
-                                decoration: BoxDecoration(
-                                  color: s.archived ? line : DshColors.brandSoft(context),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Icon(
-                                  s.archived ? Icons.archive_outlined : Icons.description_outlined,
-                                  size: 15,
-                                  color: s.archived ? ink2 : brand,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(s.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
-                                    const SizedBox(height: 1),
-                                    Text(
-                                      '${relTime(s.sortKey)}${s.cwd != null ? ' · ${s.cwd}' : ''}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(fontSize: 11.5, color: ink2),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Icon(Icons.chevron_right, size: 18, color: ink3),
-                            ],
+                : sessions.isEmpty
+                    ? DshEmpty(
+                        icon: Icons.forum_outlined,
+                        title: L10n.t('暂无会话', 'No sessions'),
+                        compact: true,
+                      )
+                    : RefreshIndicator(
+                        onRefresh: () => widget.store.refreshSessions(),
+                        // 官方侧栏会话行：R12 整行、行间 2px 留白（不用分隔线）
+                        child: ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(
+                            DshSpace.sm,
+                            DshSpace.xs,
+                            DshSpace.sm,
+                            DshSpace.lg,
                           ),
+                          itemCount: sessions.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: DshSpace.xxs),
+                          itemBuilder: (context, i) => _sessionRow(context, sessions[i], c),
                         ),
-                      );
-                    },
-                  ),
-                ),
+                      ),
+          ),
         ),
       ],
     );
   }
+
+  /// 会话行：标题 s14/ink、副标题（时间 · 工作区）xs13/ink3、整行 R12。
+  /// 归档项用 caption 文字降调，不铺灰底。
+  Widget _sessionRow(BuildContext context, Session s, DshPalette c) {
+    final archived = s.archived;
+    final sub = '${relTime(s.sortKey)}${s.cwd != null ? ' · ${s.cwd}' : ''}';
+    return DshTile(
+      leading: Icon(
+        archived ? Icons.archive_outlined : Icons.description_outlined,
+        color: archived ? c.caption : c.ink2,
+      ),
+      titleWidget: Text(
+        s.label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: DshType.s14.copyWith(color: archived ? c.caption : c.ink),
+      ),
+      subtitleWidget: Text(
+        sub,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: DshType.xs13.copyWith(color: archived ? c.caption : c.ink3),
+      ),
+      onTap: () => _open(s),
+      onLongPress: () => _showActions(s),
+      chevron: true,
+    );
+  }
 }
 
+/// 筛选胶囊：官方胶囊选择器（999px + selector 底，选中主色填充）。
 class _FilterChip extends StatelessWidget {
   final String label;
   final bool selected;
@@ -238,24 +232,6 @@ class _FilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? DshColors.brandSoft(context) : DshColors.surface(context),
-          border: Border.all(color: selected ? DshColors.brand(context) : DshColors.line(context)),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: selected ? DshColors.brand(context) : DshColors.ink2(context),
-          ),
-        ),
-      ),
-    );
+    return DshPill(label: label, active: selected, onTap: onTap);
   }
 }

@@ -1,10 +1,14 @@
 // 手机端“用量与额度”详情页。
 // 余额与配额按来源独立展示；配额窗口不相加，凭据永不下发到 App。
+//
+// 版式：DshPage + DshAppBar；来源卡片 DshCard（R20 + 发丝边 + layer2），
+// 大数字 l20、标签 xs13，额度进度统一 DshProgressBar，明细用 DshTile。
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../dsh_kit.dart';
 import '../l10n.dart';
 import '../models.dart';
 import '../store.dart';
@@ -91,70 +95,71 @@ class _UsageScreenState extends State<UsageScreen> {
   @override
   Widget build(BuildContext context) {
     final snapshot = _snapshot;
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Text(
-          L10n.t('用量与额度', 'Usage & Allowance'),
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-        actions: [
-          IconButton(
+    final c = DshPalette.of(context);
+    return DshPage(
+      title: L10n.t('用量与额度', 'Usage & Allowance'),
+      actions: [
+        if (_loading)
+          const Padding(
+            padding: EdgeInsets.only(right: DshSpace.md),
+            child: Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          )
+        else
+          DshIconButton(
+            icon: Icons.refresh,
             tooltip: L10n.t('刷新全部', 'Refresh all'),
-            onPressed: _loading ? null : _refresh,
-            icon: _loading
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.refresh, size: 20),
+            onTap: _refresh,
           ),
-        ],
-      ),
-      body: RefreshIndicator(
+        const SizedBox(width: DshSpace.xs),
+      ],
+      child: RefreshIndicator(
         onRefresh: _refresh,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+          padding: const EdgeInsets.fromLTRB(
+            DshSpace.pageH,
+            DshSpace.md,
+            DshSpace.pageH,
+            DshSpace.xxl,
+          ),
           children: [
             Text(
               L10n.t(
                 '各提供方独立显示余额或配额；不同窗口与来源不会相加。',
                 'Balances and quota windows are shown independently; windows and sources are never added together.',
               ),
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.5,
-                color: DshColors.ink3(context),
-              ),
+              style: DshType.xs13.copyWith(color: c.ink3),
             ),
-            if (_errorText != null) ...[
-              const SizedBox(height: 10),
-              _notice(_errorText!, Icons.info_outline, DshColors.warn(context)),
+            if (_errorText != null && snapshot != null && snapshot.sources.isNotEmpty) ...[
+              const SizedBox(height: DshSpace.md),
+              DshBanner(
+                message: _errorText!,
+                icon: Icons.info_outline,
+                tone: DshBannerTone.warn,
+              ),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: DshSpace.md),
             if (snapshot == null && _loading)
-              const Padding(
-                padding: EdgeInsets.only(top: 90),
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              Padding(
+                padding: const EdgeInsets.only(top: DshSpace.xxxl * 2),
+                child: DshLoading(label: L10n.t('查询中…', 'Loading…')),
               )
             else if (snapshot == null || snapshot.sources.isEmpty)
               _emptyState(snapshot)
             else ...[
               for (final source in snapshot.sources) _sourceCard(source),
               if (snapshot.fetchedAt != null) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: DshSpace.xs),
                 Center(
                   child: Text(
                     '${L10n.t('最近更新：', 'Last updated: ')}${_formatDate(snapshot.fetchedAt!)}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: DshColors.ink3(context),
-                    ),
+                    style: DshType.xs13.copyWith(color: c.ink3),
                   ),
                 ),
               ],
@@ -165,110 +170,82 @@ class _UsageScreenState extends State<UsageScreen> {
     );
   }
 
+  /// 空/失败：查询失败给 DshError（可重试），确实没有来源给 DshEmpty。
   Widget _emptyState(UsageSnapshot? snapshot) {
     final hasFailure = (snapshot?.failedCount ?? 0) > 0;
-    return Container(
-      margin: const EdgeInsets.only(top: 36),
-      padding: const EdgeInsets.fromLTRB(22, 28, 22, 26),
-      decoration: BoxDecoration(
-        color: DshColors.surface(context),
-        borderRadius: BorderRadius.circular(DshTheme.radiusMd),
-        boxShadow: Theme.of(context).brightness == Brightness.dark
-            ? DshTheme.shadowDark
-            : DshTheme.shadow,
-      ),
-      child: Column(
-        children: [
-          Icon(
-            hasFailure
-                ? Icons.cloud_off_outlined
-                : Icons.account_balance_wallet_outlined,
-            size: 34,
-            color: DshColors.ink3(context),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            hasFailure
-                ? L10n.t('当前没有可用额度来源', 'No usage source is currently available')
-                : L10n.t('暂无可用额度来源', 'No usage source is configured'),
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            L10n.t(
-              '请在电脑端「设置 → 模型」配置提供方；Codex 需要安装并登录 dsh-codex-connect。',
-              'Configure providers in desktop Settings → Models. Codex requires dsh-codex-connect to be installed and signed in.',
-            ),
-            style: TextStyle(
-              fontSize: 12.5,
-              height: 1.6,
-              color: DshColors.ink3(context),
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: _loading ? null : _refresh,
-            icon: const Icon(Icons.refresh, size: 17),
-            label: Text(L10n.t('重新查询', 'Try again')),
-          ),
-        ],
+    if (hasFailure && _errorText != null) {
+      return DshError(
+        message: _errorText!,
+        onRetry: _loading ? null : _refresh,
+        retryLabel: L10n.t('重新查询', 'Try again'),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: DshSpace.xxxl),
+      child: DshEmpty(
+        icon: Icons.account_balance_wallet_outlined,
+        title: hasFailure
+            ? L10n.t('当前没有可用额度来源', 'No usage source is currently available')
+            : L10n.t('暂无可用额度来源', 'No usage source is configured'),
+        message: L10n.t(
+          '请在电脑端「设置 → 模型」配置提供方；Codex 需要安装并登录 dsh-codex-connect。',
+          'Configure providers in desktop Settings → Models. Codex requires dsh-codex-connect to be installed and signed in.',
+        ),
+        action: DshButton(
+          label: L10n.t('重新查询', 'Try again'),
+          icon: Icons.refresh,
+          variant: DshButtonVariant.outline,
+          onPressed: _loading ? null : _refresh,
+        ),
       ),
     );
   }
 
   Widget _sourceCard(UsageSource source) {
+    final c = DshPalette.of(context);
     final icon = switch (source.id) {
       'deepseek' => Icons.account_balance_wallet_outlined,
       'codex' => Icons.auto_awesome_outlined,
       'opencode-go' => Icons.code_outlined,
       _ => Icons.data_usage_outlined,
     };
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      decoration: BoxDecoration(
-        color: DshColors.surface(context),
-        borderRadius: BorderRadius.circular(DshTheme.radiusMd),
-        boxShadow: Theme.of(context).brightness == Brightness.dark
-            ? DshTheme.shadowDark
-            : DshTheme.shadow,
-      ),
+    final account = source.account == null
+        ? ''
+        : [
+            source.account!.displayName,
+            source.account!.maskedEmail,
+          ].whereType<String>().where((v) => v.trim().isNotEmpty).join(' · ');
+    return DshCard(
+      margin: const EdgeInsets.only(bottom: DshSpace.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 20, color: DshColors.brand(context)),
-              const SizedBox(width: 9),
+              Icon(icon, size: 20, color: c.ink2),
+              const SizedBox(width: DshSpace.sm),
               Expanded(
                 child: Text(
                   source.title,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: DshType.sStrong14.copyWith(color: c.ink),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               if (!source.available)
-                _statusChip(
-                  L10n.t('不可用', 'Unavailable'),
-                  DshColors.warn(context),
+                DshTag(
+                  label: L10n.t('不可用', 'Unavailable'),
+                  color: c.warn,
+                  background: c.warnSoft,
+                  dense: true,
                 ),
             ],
           ),
-          if (source.account != null) ...[
-            const SizedBox(height: 5),
-            Text(
-              [source.account!.displayName, source.account!.maskedEmail]
-                  .whereType<String>()
-                  .where((v) => v.trim().isNotEmpty)
-                  .join(' · '),
-              style: TextStyle(fontSize: 11.5, color: DshColors.ink3(context)),
-            ),
+          if (account.isNotEmpty) ...[
+            const SizedBox(height: DshSpace.xs),
+            Text(account, style: DshType.xs13.copyWith(color: c.ink3)),
           ],
-          const SizedBox(height: 14),
+          const SizedBox(height: DshSpace.md),
           if (source.kind == 'balance')
             _balanceBody(source)
           else
@@ -279,40 +256,34 @@ class _UsageScreenState extends State<UsageScreen> {
   }
 
   Widget _balanceBody(UsageSource source) {
+    final c = DshPalette.of(context);
     final currency = source.currency == 'CNY'
         ? '¥'
         : (source.currency == null || source.currency!.isEmpty
               ? ''
               : '${source.currency} ');
     final amount = source.amountNumber;
-    final amountColor = source.available ? DshColors.brand(context) : DshColors.ink3(context);
+    final color = source.available ? c.ink : c.ink3;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text(
-          currency,
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: amountColor,
+        Text(currency, style: DshType.m16.copyWith(color: c.ink2)),
+        Flexible(
+          child: Text(
+            amount == null ? (source.amount ?? '—') : amount.toStringAsFixed(2),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: DshType.l20.copyWith(color: color),
           ),
         ),
-        Text(
-          amount == null ? (source.amount ?? '—') : amount.toStringAsFixed(2),
-          style: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.w700,
-            color: amountColor,
-          ),
-        ),
-        const SizedBox(width: 8),
+        const SizedBox(width: DshSpace.sm),
         Padding(
-          padding: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.only(bottom: DshSpace.xs),
           child: Text(
             source.available
                 ? L10n.t('可用余额', 'available balance')
                 : L10n.t('余额不可用', 'balance unavailable'),
-            style: TextStyle(fontSize: 12, color: DshColors.ink3(context)),
+            style: DshType.xs13.copyWith(color: c.ink3),
           ),
         ),
       ],
@@ -325,16 +296,16 @@ class _UsageScreenState extends State<UsageScreen> {
       children: [
         for (final window in source.windows) _windowRow(window),
         if (source.credits != null) ...[
-          if (source.windows.isNotEmpty) const SizedBox(height: 12),
-          _detailRow(
+          if (source.windows.isNotEmpty) const SizedBox(height: DshSpace.sm),
+          _detailTile(
             L10n.t('Credits', 'Credits'),
             _creditsText(source.credits!),
           ),
         ],
         if (source.individualLimit != null) ...[
           if (source.windows.isNotEmpty || source.credits != null)
-            const SizedBox(height: 8),
-          _detailRow(
+            const SizedBox(height: DshSpace.xs),
+          _detailTile(
             L10n.t('个人消费上限', 'Individual limit'),
             '${source.individualLimit!.remaining} / ${source.individualLimit!.limit}',
             sub: L10n.t('已用 ', 'Used ') + source.individualLimit!.used,
@@ -345,10 +316,11 @@ class _UsageScreenState extends State<UsageScreen> {
   }
 
   Widget _windowRow(UsageWindow window) {
+    final c = DshPalette.of(context);
     final remaining = window.remainingPercent.clamp(0, 100).toDouble();
-    final color = _quotaColor(remaining);
+    final color = _quotaColor(remaining, limited: window.limited);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 13),
+      padding: const EdgeInsets.only(bottom: DshSpace.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -360,17 +332,18 @@ class _UsageScreenState extends State<UsageScreen> {
                     Flexible(
                       child: Text(
                         _windowName(window.window),
-                        style: const TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: DshType.s14.copyWith(color: c.ink),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     if (window.limited) ...[
-                      const SizedBox(width: 6),
-                      _statusChip(
-                        L10n.t('已限流', 'Rate limited'),
-                        DshColors.danger(context),
+                      const SizedBox(width: DshSpace.xs),
+                      DshTag(
+                        label: L10n.t('已限流', 'Rate limited'),
+                        color: c.danger,
+                        background: c.dangerSoft,
+                        dense: true,
                       ),
                     ],
                   ],
@@ -378,29 +351,21 @@ class _UsageScreenState extends State<UsageScreen> {
               ),
               Text(
                 '${_percentText(remaining)}${L10n.t(' 剩余', ' left')}',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                ),
+                style: DshType.xs13.copyWith(color: color),
               ),
             ],
           ),
-          const SizedBox(height: 7),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(99),
-            child: LinearProgressIndicator(
-              value: remaining / 100,
-              minHeight: 7,
-              backgroundColor: color.withValues(alpha: 0.14),
-              valueColor: AlwaysStoppedAnimation<Color>(color),
-            ),
+          const SizedBox(height: DshSpace.sm),
+          // 进度条占满整行（DshProgressBar 内部按比例填充，需要紧宽度约束）
+          SizedBox(
+            width: double.infinity,
+            child: DshProgressBar(value: remaining / 100, color: color),
           ),
           if (window.resetAt != null) ...[
-            const SizedBox(height: 5),
+            const SizedBox(height: DshSpace.xs),
             Text(
               _resetText(window.resetAt!),
-              style: TextStyle(fontSize: 11, color: DshColors.ink3(context)),
+              style: DshType.xs13.copyWith(color: c.ink3),
             ),
           ],
         ],
@@ -415,84 +380,24 @@ class _UsageScreenState extends State<UsageScreen> {
     return '\$$value';
   }
 
-  Widget _detailRow(String label, String value, {String? sub}) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: DshColors.ink2(context),
-                ),
-              ),
-              if (sub != null)
-                Text(
-                  sub,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: DshColors.ink3(context),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-        ),
-      ],
+  /// 明细行：标签 + 取值（DshTile dense，贴着卡片内衬不额外缩进）。
+  Widget _detailTile(String label, String value, {String? sub}) {
+    final c = DshPalette.of(context);
+    return DshTile(
+      dense: true,
+      title: label,
+      subtitle: sub,
+      padding: const EdgeInsets.symmetric(vertical: DshSpace.xs),
+      trailing: Text(value, style: DshType.sStrong14.copyWith(color: c.ink)),
     );
   }
 
-  Widget _notice(String text, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 17, color: color),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(fontSize: 12, color: color, height: 1.35),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _statusChip(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 10.5,
-          color: color,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-
-  Color _quotaColor(double percent) {
-    if (percent < 20) return DshColors.danger(context);
-    if (percent < 50) return DshColors.warn(context);
-    return DshColors.ok(context);
+  /// 额度颜色：正常 brand、接近上限 warn、超限/限流 danger。
+  Color _quotaColor(double percent, {bool limited = false}) {
+    final c = DshPalette.of(context);
+    if (limited || percent <= 0) return c.danger;
+    if (percent < 20) return c.warn;
+    return c.brand;
   }
 
   String _windowName(String id) => switch (id) {

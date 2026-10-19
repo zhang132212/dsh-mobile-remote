@@ -62,7 +62,9 @@ Future<void> _openSheet(WidgetTester tester, AppStore store, Api apiClient) asyn
   await _settle(tester); // 面板弹出动画：必须逐帧推进，单次 pump 面板还在视口外
   expect(find.text('会话工具'), findsOneWidget, reason: '面板应弹出');
   expect(find.text('子代理'), findsOneWidget, reason: '应有子代理页签');
-  await tester.tap(find.byType(Tab).at(1)); // 点 Tab 组件本身，点文字命中不稳
+  // 页签条已从 TabBar 换成官方分段控件（DshSegmented），树里不再有 Tab 组件；
+  // 段落本身是整块可点的 GestureDetector，点文字即可命中。
+  await tester.tap(find.text('子代理'));
   await _settle(tester); // 页签切换 + 加载
 }
 

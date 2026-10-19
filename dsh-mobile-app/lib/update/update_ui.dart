@@ -6,9 +6,13 @@
 //
 // 信任判断全部在 Updater 里（验签 + sha256），这里只负责呈现与引导；
 // 安装前必须让用户看到「版本号 + 更新说明」，不静默安装。
+//
+// 样式：主题对话框（R28 + 发丝边）、版本号 m16、按钮 DshButton、
+// 进度 DshProgressBar；更新说明仍按 Markdown 渲染（renderMarkdownBlocks）。
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../dsh_kit.dart';
 import '../l10n.dart';
 import '../logger.dart';
 import '../md.dart';
@@ -59,7 +63,16 @@ Future<void> checkUpdateInteractive(BuildContext context) async {
   showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => const Center(child: CircularProgressIndicator()),
+    // 主题对话框：R28 面 + 0.5px 发丝边，内部只用细环加载
+    builder: (_) => Dialog(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: DshSpace.xxl,
+          vertical: DshSpace.xl,
+        ),
+        child: DshLoading(label: L10n.t('检查更新中…', 'Checking for updates…')),
+      ),
+    ),
   );
   UpdateInfo? info;
   Object? error;
@@ -91,39 +104,58 @@ Future<void> _promptUpdate(BuildContext context, UpdateInfo info) async {
   final go = await showDialog<bool>(
     context: context,
     builder: (c) => AlertDialog(
-      title: Text(L10n.t('发现新版本 v${info.versionName}', 'New version v${info.versionName}')),
+      title: Text(L10n.t('发现新版本', 'New version available')),
       content: ConstrainedBox(
         constraints: const BoxConstraints(maxHeight: 380),
         child: SingleChildScrollView(
-          // 更新说明本身就是 Markdown（Release notes），必须按 Markdown 渲染——
-          // 否则用户看到的是裸露的 `##`、`-`、反引号（模拟器实测踩中）。
-          // 顺便缩到 0.85 倍：弹窗里正文 15px 偏大。
-          child: MediaQuery.withClampedTextScaling(
-            minScaleFactor: 0.85,
-            maxScaleFactor: 0.85,
-            child: Builder(
-              builder: (c) {
-                final notes = info.notes.trim();
-                if (notes.isEmpty) {
-                  return Text(L10n.t('（本次发布未填写更新说明）', '(no release notes)'));
-                }
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: renderMarkdownBlocks(notes, c),
-                );
-              },
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'v${info.versionName}',
+                style: DshType.m16.copyWith(color: DshPalette.of(c).ink),
+              ),
+              const SizedBox(height: DshSpace.sm),
+              // 更新说明本身就是 Markdown（Release notes），必须按 Markdown 渲染——
+              // 否则用户看到的是裸露的 `##`、`-`、反引号（模拟器实测踩中）。
+              // 顺便缩到 0.85 倍：md.dart 正文固定 15px，弹窗里偏大。
+              MediaQuery.withClampedTextScaling(
+                minScaleFactor: 0.85,
+                maxScaleFactor: 0.85,
+                child: Builder(
+                  builder: (notesCtx) {
+                    final notes = info.notes.trim();
+                    if (notes.isEmpty) {
+                      return Text(
+                        L10n.t('（本次发布未填写更新说明）', '(no release notes)'),
+                        style: DshType.xs13.copyWith(
+                          color: DshPalette.of(notesCtx).ink3,
+                        ),
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: renderMarkdownBlocks(notes, notesCtx),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ),
       ),
       actions: [
-        TextButton(
+        DshButton(
+          label: L10n.t('稍后', 'Later'),
+          variant: DshButtonVariant.ghost,
+          size: DshButtonSize.sm,
           onPressed: () => Navigator.of(c).pop(false),
-          child: Text(L10n.t('稍后', 'Later')),
         ),
-        FilledButton(
+        DshButton(
+          label: L10n.t('立即更新', 'Update now'),
+          size: DshButtonSize.sm,
           onPressed: () => Navigator.of(c).pop(true),
-          child: Text(L10n.t('立即更新', 'Update now')),
         ),
       ],
     ),
@@ -135,21 +167,27 @@ Future<void> _promptUpdate(BuildContext context, UpdateInfo info) async {
   showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => AlertDialog(
+    builder: (ctx) => AlertDialog(
       title: Text(L10n.t('正在下载更新', 'Downloading update')),
       content: ValueListenableBuilder<double?>(
         valueListenable: progress,
-        builder: (_, v, _) => Column(
+        builder: (innerCtx, v, _) => Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            LinearProgressIndicator(value: v),
-            const SizedBox(height: 10),
+            // 进度条占满弹窗宽度（DshProgressBar 内部按比例填充，需要紧宽度约束）
+            SizedBox(
+              width: double.infinity,
+              child: DshProgressBar(value: v ?? 0),
+            ),
+            const SizedBox(height: DshSpace.md),
             Text(
               v == null
                   ? L10n.t('已下载…', 'Downloading…')
                   : L10n.t('${(v * 100).toStringAsFixed(0)}%', '${(v * 100).toStringAsFixed(0)}%'),
-              style: const TextStyle(fontSize: 12),
+              style: DshType.xs13.copyWith(
+                color: DshPalette.of(innerCtx).ink3,
+              ),
             ),
           ],
         ),
@@ -190,18 +228,21 @@ class CheckUpdateTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(Icons.system_update_alt, color: DshColors.ink2(context)),
-      title: Text(L10n.t('检查更新', 'Check for updates')),
-      subtitle: FutureBuilder<String>(
+    final c = DshPalette.of(context);
+    return DshTile(
+      leading: const Icon(Icons.system_update_alt),
+      title: L10n.t('检查更新', 'Check for updates'),
+      subtitleWidget: FutureBuilder<String>(
         future: installedVersionName(),
         builder: (_, snap) => Text(
           L10n.t('当前版本 v${snap.data ?? '…'}', 'Current v${snap.data ?? '…'}'),
-          style: const TextStyle(fontSize: 12),
+          style: DshType.xs13.copyWith(color: c.ink3),
         ),
       ),
-      trailing: const Icon(Icons.chevron_right, size: 18),
-      onTap: () => checkUpdateInteractive(context),
+      chevron: true,
+      onTap: () {
+        checkUpdateInteractive(context);
+      },
     );
   }
 }

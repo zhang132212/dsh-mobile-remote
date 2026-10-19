@@ -11,10 +11,14 @@ import 'package:dsh_mobile_app/md.dart';
 /// 其中「围栏内更短的纯反引号行」「5 反引号嵌 4 反引号」「信息串含反引号」三例在修复前
 /// 会失败，修复后通过——作为该修复的红→绿对照证据。
 
+/// 代码块文本的判定：走 DshType 的等宽栈（fontFamilyFallback 里的 JetBrains Mono），
+/// 字面色 'monospace' 只在旧写法下出现——两种都算，测试不锁死实现细节。
 Finder _codeCardText([String? contains]) => find.byWidgetPredicate(
       (w) =>
           w is Text &&
-          w.style?.fontFamily == 'monospace' &&
+          (w.style?.fontFamily == 'monospace' ||
+              (w.style?.fontFamilyFallback?.contains('JetBrains Mono') ??
+                  false)) &&
           (contains == null || (w.data ?? '').contains(contains)),
     );
 

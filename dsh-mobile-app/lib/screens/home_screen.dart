@@ -1,6 +1,7 @@
-// 首页：欢迎 + 最近会话 + 新建会话
+// 首页：欢迎 + 连接状态 + 最近会话 + 新建会话
 import 'package:flutter/material.dart';
 import '../l10n.dart';
+import '../dsh_kit.dart';
 import '../toast.dart';
 import '../models.dart';
 import '../store.dart';
@@ -49,8 +50,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final store = widget.store;
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
+    final c = DshPalette.of(context);
+    // 连接状态：与顶栏状态点同源（纯展示，点按重连仍在顶栏）
+    final (connColor, connLabel) = switch (store.connState) {
+      'connected' => (c.ok, L10n.t('电脑在线', 'PC online')),
+      'connecting' => (c.warn, L10n.t('连接中…', 'Connecting…')),
+      _ => (c.ink3, L10n.t('电脑离线', 'PC offline')),
+    };
+    final recentTitle = store.workspaceTitle != null
+        ? '${L10n.t('最近会话', 'Recent Sessions')} · ${store.workspaceTitle}'
+        : L10n.t('最近会话', 'Recent Sessions');
 
     return Column(
       children: [
@@ -73,84 +82,98 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Align(
                     alignment: const Alignment(0, -0.6),
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: DshSpace.pageH,
+                        vertical: DshSpace.xxl,
+                      ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           // 官方 logo（DeepSeek 官网 favicon 转 PNG，蓝鲸标志）
-                          Image.asset(
-                            'assets/deepseek-logo.png',
-                            width: 84,
-                            height: 84,
+                          Center(
+                            child: Image.asset(
+                              'assets/deepseek-logo.png',
+                              width: 72,
+                              height: 72,
+                            ),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: DshSpace.lg),
                           // 欢迎
                           Text(
                             L10n.t('今天打算设计什么？', 'What are you designing today?'),
                             textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 30,
-                              height: 1.35,
-                              fontWeight: FontWeight.w700,
-                              fontFamily: 'Georgia',
-                              color: Theme.of(context).colorScheme.onSurface,
+                            style: DshType.l20.copyWith(color: c.ink),
+                          ),
+                          const SizedBox(height: DshSpace.md),
+                          // 连接状态：状态点 + 标签
+                          Center(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                DshStatusDot(
+                                  color: connColor,
+                                  pulse: store.connState == 'connecting',
+                                ),
+                                const SizedBox(width: DshSpace.sm),
+                                DshTag(label: connLabel, color: connColor),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 24),
-                          // 最近会话卡
-                          Container(
-                            decoration: BoxDecoration(
-                              color: DshColors.surface(context),
-                              borderRadius: BorderRadius.circular(DshTheme.radiusMd),
-                              boxShadow: Theme.of(context).brightness == Brightness.dark ? DshTheme.shadowDark : DshTheme.shadow,
+                          const SizedBox(height: DshSpace.xxl),
+                          // 最近会话（分组标题 + 官方设置卡片）
+                          DshSectionHeader(
+                            recentTitle,
+                            padding: const EdgeInsets.only(
+                              left: DshSpace.xs,
+                              right: DshSpace.xs,
+                              bottom: DshSpace.sm,
                             ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 12, bottom: 2),
-                                    child: Text(
-                                      store.workspaceTitle != null ? '${L10n.t('最近会话', 'Recent Sessions')} · ${store.workspaceTitle}' : L10n.t('最近会话', 'Recent Sessions'),
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        fontWeight: FontWeight.w600,
-                                        letterSpacing: 0.5,
-                                        color: ink3,
+                          ),
+                          DshCard(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: DshSpace.xs,
+                            ),
+                            child: store.activeSessions.isEmpty
+                                ? Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: DshSpace.xxl,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        L10n.t('暂无会话，点下方新建', 'No sessions yet, create one below'),
+                                        style: DshType.xs13.copyWith(color: c.ink3),
+                                      ),
+                                    ),
+                                  )
+                                // 恰好完整显示 3 行（3×H64+发丝线），第 4 行露边提示可滑动
+                                : ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxHeight: DshSpace.rowMinTwoLine * 3,
+                                    ),
+                                    child: ListView.separated(
+                                      shrinkWrap: true,
+                                      padding: EdgeInsets.zero,
+                                      itemCount: store.activeSessions.length,
+                                      separatorBuilder: (_, _) => const DshDivider(
+                                        indent: DshSpace.md,
+                                        endIndent: DshSpace.md,
+                                      ),
+                                      itemBuilder: (context, i) => _SessionRow(
+                                        session: store.activeSessions[i],
+                                        workspace: store.workspaceLabelOf(store.activeSessions[i]),
+                                        onTap: () => _openSession(store.activeSessions[i]),
                                       ),
                                     ),
                                   ),
-                                  if (store.activeSessions.isEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(vertical: 24),
-                                      child: Center(child: Text(L10n.t('暂无会话，点下方新建', 'No sessions yet, create one below'), style: const TextStyle(color: Colors.grey))),
-                                    )
-                                  else
-                                    // 恰好完整显示 3 行（约 3×52+分隔线），第 4 行露边提示可滑动
-                                    ConstrainedBox(
-                                      constraints: const BoxConstraints(maxHeight: 176),
-                                      child: ListView.separated(
-                                        shrinkWrap: true,
-                                        padding: EdgeInsets.zero,
-                                        itemCount: store.activeSessions.length,
-                                        separatorBuilder: (_, _) => Divider(height: 1, color: line),
-                                        itemBuilder: (context, i) => _SessionRow(
-                                          session: store.activeSessions[i],
-                                          workspace: store.workspaceLabelOf(store.activeSessions[i]),
-                                          onTap: () => _openSession(store.activeSessions[i]),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: DshSpace.lg),
                           // 新建会话
-                          FilledButton(
-                            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+                          DshButton(
+                            label: L10n.t('＋ 新建会话', '+ New Session'),
+                            variant: DshButtonVariant.primary,
+                            size: DshButtonSize.lg,
+                            expanded: true,
                             // v3.0.0 review：双击防抖——连点会并行弹出两个新建会话弹层
                             onPressed: () {
                               if (_openingSheet) return;
@@ -163,16 +186,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                     onTitleChanged: widget.onOpenSession);
                               }).whenComplete(() => _openingSheet = false);
                             },
-                            child: Text(L10n.t('＋ 新建会话', '+ New Session')),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: DshSpace.sm),
                           // v3.2.0：文档阅读入口——浏览电脑工作区里的
                           // md / txt / docx / xlsx 并直接在手机上阅读（公式真排版、
                           // 超链接可点、可导出带 Word 原生公式的 .docx）
-                          OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
-                            icon: const Icon(Icons.menu_book_outlined, size: 18),
-                            label: Text(L10n.t('文档阅读', 'Read Documents')),
+                          DshButton(
+                            label: L10n.t('文档阅读', 'Read Documents'),
+                            icon: Icons.menu_book_outlined,
+                            variant: DshButtonVariant.outline,
+                            size: DshButtonSize.lg,
+                            expanded: true,
                             onPressed: () => Navigator.of(context).push(
                               MaterialPageRoute<void>(builder: (_) => const DocBrowserScreen()),
                             ),
@@ -191,6 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+/// 最近会话行：官方列表行几何（H64 双行、标题 14/ink、副标题 13/ink3、R12）。
 class _SessionRow extends StatelessWidget {
   final Session session;
   final String? workspace; // 所属工作区标题（null = 无工作区概念，不显示）
@@ -199,54 +224,14 @@ class _SessionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    return InkWell(
+    return DshTile(
+      leading: const Icon(Icons.description_outlined),
+      title: session.label,
+      subtitle: workspace == null
+          ? relTime(session.sortKey)
+          : '${relTime(session.sortKey)} · $workspace',
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: Row(
-          children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(color: line, borderRadius: BorderRadius.circular(8)),
-              child: Icon(Icons.description_outlined, size: 15, color: ink2),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(session.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14)),
-                  const SizedBox(height: 1),
-                  Row(
-                    children: [
-                      Text(relTime(session.sortKey), style: TextStyle(fontSize: 11.5, color: ink2)),
-                      // 所属工作区小字标注（与 PC 端分组同源）；长标题省略号防溢出
-                      if (workspace != null) ...[
-                        Text(' · ', style: TextStyle(fontSize: 11, color: ink3)),
-                        Icon(Icons.folder_outlined, size: 11, color: ink3),
-                        const SizedBox(width: 2),
-                        Flexible(
-                          child: Text(
-                            workspace!,
-                            style: TextStyle(fontSize: 11, color: ink3),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right, size: 18, color: ink3),
-          ],
-        ),
-      ),
+      chevron: true,
     );
   }
 }

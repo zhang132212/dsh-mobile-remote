@@ -1,9 +1,13 @@
 // 会话工具弹层（v2.7）：任务（后台任务）/ 子代理 / 目标 三个页签。
 // 数据与 PC 端同源：任务走 session/jobs 帧 + /api/jobs；子代理/目标走插件端点。
+//
+// 版式：统一 showDshSheet + DshSheet（R28 顶角 + 拖拽把手 + 标题），
+// 页签用官方 DshSegmented（外框 R12 + 4px 内衬 + R8 段），行与卡片走 DshTile/DshCard。
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import '../api.dart';
+import '../dsh_kit.dart';
 import '../l10n.dart';
 import '../store.dart';
 import '../theme.dart';
@@ -18,11 +22,8 @@ void showSessionToolsSheet(BuildContext context, AppStore store, String sessionI
     {VoidCallback? onTitleChanged, Api? apiClient}) {
   // 面板关闭与子会话跳转都挂在**调用方上下文**上——面板自己的 ctx 在 pop 之后就不能再用。
   final navigator = Navigator.of(context);
-  showModalBottomSheet<void>(
+  showDshSheet<void>(
     context: context,
-    isScrollControlled: true,
-    backgroundColor: Theme.of(context).colorScheme.surface,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
     builder: (ctx) => _SessionToolsSheet(
       store: store,
       sessionId: sessionId,
@@ -58,54 +59,99 @@ class _SessionToolsSheet extends StatefulWidget {
   State<_SessionToolsSheet> createState() => _SessionToolsSheetState();
 }
 
-class _SessionToolsSheetState extends State<_SessionToolsSheet> {
+class _SessionToolsSheetState extends State<_SessionToolsSheet>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs = TabController(length: 3, vsync: this);
+  // 分段控件的高亮下标：与 TabController 同步（左右滑动切页时也要跟上）
+  int _segIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs.addListener(_syncIndex);
+  }
+
+  void _syncIndex() {
+    if (mounted && _tabs.index != _segIndex) {
+      setState(() => _segIndex = _tabs.index);
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabs.removeListener(_syncIndex);
+    _tabs.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final ink3 = DshColors.ink3(context);
-    return SafeArea(
+    // 把手 + 标题 + 分段控件占高：面板整体高度与旧版（0.62 屏高）持平
+    final bodyHeight =
+        (MediaQuery.of(context).size.height * 0.62 - 104).clamp(200.0, 720.0).toDouble();
+    return DshSheet(
+      title: L10n.t('会话工具', 'Session Tools'),
+      scrollable: false,
+      padding: EdgeInsets.zero,
       child: SizedBox(
-        height: MediaQuery.of(context).size.height * 0.62,
-        child: DefaultTabController(
-          length: 3,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(L10n.t('会话工具', 'Session Tools'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        height: bodyHeight,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                DshSpace.xl,
+                0,
+                DshSpace.xl,
+                DshSpace.md,
               ),
-              const SizedBox(height: 8),
-              TabBar(
-                labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-                unselectedLabelStyle: TextStyle(fontSize: 13, color: ink3),
-                labelColor: DshColors.brand(context),
-                unselectedLabelColor: ink3,
-                indicatorColor: DshColors.brand(context),
-                tabs: [
-                  Tab(text: L10n.t('任务', 'Jobs')),
-                  Tab(text: L10n.t('子代理', 'Subagents')),
-                  Tab(text: L10n.t('目标', 'Goal')),
+              child: DshSegmented(
+                items: [
+                  L10n.t('任务', 'Jobs'),
+                  L10n.t('子代理', 'Subagents'),
+                  L10n.t('目标', 'Goal'),
+                ],
+                index: _segIndex,
+                onChanged: (i) => _tabs.animateTo(i),
+              ),
+            ),
+            Expanded(
+              child: TabBarView(
+                controller: _tabs,
+                children: [
+                  _JobsTab(store: widget.store, sessionId: widget.sessionId),
+                  _SubagentsTab(
+                    sessionId: widget.sessionId,
+                    onOpenSubagent: widget.onOpenSubagent,
+                    apiClient: widget.apiClient,
+                  ),
+                  _GoalTab(sessionId: widget.sessionId, apiClient: widget.apiClient),
                 ],
               ),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _JobsTab(store: widget.store, sessionId: widget.sessionId),
-                    _SubagentsTab(
-                      sessionId: widget.sessionId,
-                      onOpenSubagent: widget.onOpenSubagent,
-                      apiClient: widget.apiClient,
-                    ),
-                    _GoalTab(sessionId: widget.sessionId, apiClient: widget.apiClient),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
+
+/// 页签内容的统一内衬（外层弹层已去掉内衬，列表回到行内衬 12 + 8 = 20，与标题对齐）。
+const EdgeInsets _tabPadding = EdgeInsets.fromLTRB(
+  DshSpace.sm,
+  DshSpace.sm,
+  DshSpace.sm,
+  DshSpace.lg,
+);
+
+/// 元信息行（12/18 · tertiary）。
+Widget _meta(String text) => Builder(
+      builder: (context) => Text(
+        text,
+        style: DshType.xxs12.copyWith(color: DshPalette.of(context).ink3),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
 
 // ── 任务页签 ──
 class _JobsTab extends StatefulWidget {
@@ -159,76 +205,59 @@ class _JobsTabState extends State<_JobsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final ok = DshColors.ok(context);
-    final warn = DshColors.warn(context);
-    final danger = DshColors.danger(context);
+    final c = DshPalette.of(context);
     if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('${L10n.t('加载失败：', 'Failed to load: ')}$_error', style: TextStyle(fontSize: 12.5, color: ink2)),
-            TextButton(onPressed: _load, child: Text(L10n.t('重试', 'Retry'))),
-          ],
-        ),
+      return DshError(
+        message: '${L10n.t('加载失败：', 'Failed to load: ')}$_error',
+        onRetry: _load,
       );
     }
     final jobs = _jobs;
-    if (jobs == null) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-    }
+    if (jobs == null) return const DshLoading();
     if (jobs.isEmpty) {
-      return Center(child: Text(L10n.t('暂无任务', 'No jobs'), style: TextStyle(fontSize: 13, color: ink3)));
+      return DshEmpty(icon: Icons.history_toggle_off_outlined, title: L10n.t('暂无任务', 'No jobs'));
     }
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+        padding: _tabPadding,
         itemCount: jobs.length,
-        separatorBuilder: (_, _) => Divider(height: 1, color: line),
+        separatorBuilder: (_, _) => const DshDivider(
+          indent: DshSpace.md,
+          endIndent: DshSpace.md,
+        ),
         itemBuilder: (context, i) {
           final j = jobs[i];
           final status = j['status'] as String? ?? '';
-          final color = status == 'completed'
-              ? ok
-              : (status == 'running' || status == 'stopping')
-                  ? warn
-                  : (status == 'failed' ? danger : ink3);
+          final running = status == 'running' || status == 'stopping';
+          // 运行中 → business（脉冲）、成功 → ok、失败 → danger，其余按未激活处理
+          final dotColor = status == 'completed'
+              ? c.ok
+              : running
+                  ? c.business
+                  : status == 'failed'
+                      ? c.danger
+                      : c.idle;
           final label = (j['label'] as String? ?? j['id'] as String? ?? L10n.t('任务', 'Job')).toString();
           final kind = j['kind'] as String?;
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.circle, size: 8, color: color),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(label, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      Text(
-                        [if (kind != null && kind.isNotEmpty) kind, status].join(' · '),
-                        style: TextStyle(fontSize: 11.5, color: ink3),
-                      ),
-                    ],
-                  ),
-                ),
-                if (status == 'running')
-                  TextButton(
-                    onPressed: () => _kill(j),
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size(0, 30),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: Text(L10n.t('取消', 'Cancel'), style: TextStyle(fontSize: 12, color: danger)),
-                  ),
-              ],
+          return DshTile(
+            dense: true,
+            // 与官方 leading 图标同尺寸的占位：脉冲环扩张时不挤压标题
+            leading: SizedBox(
+              width: DshSpace.xl,
+              height: DshSpace.xl,
+              child: Center(child: DshStatusDot(color: dotColor, pulse: running)),
             ),
+            title: label,
+            subtitleWidget: _meta([if (kind != null && kind.isNotEmpty) kind, status].join(' · ')),
+            trailing: status == 'running'
+                ? DshButton(
+                    label: L10n.t('取消', 'Cancel'),
+                    variant: DshButtonVariant.danger,
+                    size: DshButtonSize.sm,
+                    onPressed: () => _kill(j),
+                  )
+                : null,
           );
         },
       ),
@@ -284,81 +313,79 @@ class _SubagentsTabState extends State<_SubagentsTab> {
     }
   }
 
+  /// 子代理状态标签（`DshTag`）：运行中 business、失败 danger，其余中性。
+  (String, Color, Color) _statusTag(DshPalette c, String status) => switch (status) {
+        'running' => (L10n.t('运行中', 'Running'), c.business, c.bubble),
+        'inactive' => (L10n.t('已结束', 'Inactive'), c.ink3, c.tag),
+        'failed' || 'error' => (L10n.t('失败', 'Failed'), c.danger, c.dangerSoft),
+        _ => (status, c.ink3, c.tag),
+      };
+
   @override
   Widget build(BuildContext context) {
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final warn = DshColors.warn(context);
-    final danger = DshColors.danger(context);
+    final c = DshPalette.of(context);
     if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('${L10n.t('加载失败：', 'Failed to load: ')}$_error', style: TextStyle(fontSize: 12.5, color: ink2)),
-            TextButton(onPressed: _load, child: Text(L10n.t('重试', 'Retry'))),
-          ],
-        ),
+      return DshError(
+        message: '${L10n.t('加载失败：', 'Failed to load: ')}$_error',
+        onRetry: _load,
       );
     }
     final subs = _subs;
-    if (subs == null) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-    }
+    if (subs == null) return const DshLoading();
     if (subs.isEmpty) {
-      return Center(child: Text(L10n.t('暂无子代理', 'No subagents'), style: TextStyle(fontSize: 13, color: ink3)));
+      return DshEmpty(icon: Icons.polyline_outlined, title: L10n.t('暂无子代理', 'No subagents'));
     }
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+        padding: _tabPadding,
         itemCount: subs.length,
-        separatorBuilder: (_, _) => Divider(height: 1, color: line),
+        separatorBuilder: (_, _) => const DshDivider(
+          indent: DshSpace.md,
+          endIndent: DshSpace.md,
+        ),
         itemBuilder: (context, i) {
           final s = subs[i];
           final id = (s['id'] as String? ?? '').toString();
-          final running = s['status'] == 'running';
-          return InkWell(
+          final status = (s['status'] as String? ?? '').toString();
+          final running = status == 'running';
+          final (tagLabel, tagFg, tagBg) = _statusTag(c, status);
+          return DshTile(
+            dense: true,
+            leading: const Icon(Icons.polyline_outlined),
             // v3.1.5（#11 复核补正）：整行可点 → 跳到该子代理会话；右侧箭头提示可进入。
             onTap: id.isEmpty ? null : () => widget.onOpenSubagent(id),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                children: [
-                  Icon(Icons.polyline_outlined, size: 16, color: warn),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          (s['title'] as String? ?? id).toString(),
-                          style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Text(
-                          [id, (s['status'] as String? ?? '').toString()].join(' · '),
-                          style: TextStyle(fontSize: 11.5, color: ink3),
-                        ),
-                      ],
-                    ),
+            titleWidget: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    (s['title'] as String? ?? id).toString(),
+                    style: DshType.s14.copyWith(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  if (running)
-                    TextButton(
-                      onPressed: () => _interrupt(id),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 30),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text(L10n.t('中断', 'Interrupt'), style: TextStyle(fontSize: 12, color: danger)),
-                    ),
-                  if (id.isNotEmpty) Icon(Icons.chevron_right, size: 18, color: ink3),
+                ),
+                if (tagLabel.isNotEmpty) ...[
+                  const SizedBox(width: DshSpace.sm),
+                  DshTag(
+                    dense: true,
+                    label: tagLabel,
+                    color: tagFg,
+                    background: tagBg,
+                  ),
                 ],
-              ),
+              ],
             ),
+            subtitleWidget: id.isEmpty ? null : _meta(id),
+            trailing: running
+                ? DshButton(
+                    label: L10n.t('中断', 'Interrupt'),
+                    variant: DshButtonVariant.danger,
+                    size: DshButtonSize.sm,
+                    onPressed: () => _interrupt(id),
+                  )
+                : null,
+            chevron: id.isNotEmpty,
           );
         },
       ),
@@ -429,28 +456,26 @@ class _GoalTabState extends State<_GoalTab> {
     }
   }
 
+  /// 目标状态 → `DshTag` 配色（进行中 business、已完成 ok、暂停 warn、受阻 danger）。
+  static (Color, Color) _phaseTone(DshPalette c, String phase) => switch (phase) {
+        'active' => (c.business, c.bubble),
+        'complete' => (c.ok, c.okSoft),
+        'paused' => (c.warnLabel, c.warnSoft),
+        'blocked' => (c.danger, c.dangerSoft),
+        _ => (c.ink3, c.tag),
+      };
+
   @override
   Widget build(BuildContext context) {
-    final ink2 = DshColors.ink2(context);
-    final ink3 = DshColors.ink3(context);
-    final line = DshColors.line(context);
-    final brand = DshColors.brand(context);
-    final danger = DshColors.danger(context);
+    final c = DshPalette.of(context);
     if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('${L10n.t('加载失败：', 'Failed to load: ')}$_error', style: TextStyle(fontSize: 12.5, color: ink2)),
-            TextButton(onPressed: _load, child: Text(L10n.t('重试', 'Retry'))),
-          ],
-        ),
+      return DshError(
+        message: '${L10n.t('加载失败：', 'Failed to load: ')}$_error',
+        onRetry: _load,
       );
     }
     final goal = _goal;
-    if (!_loaded) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-    }
+    if (!_loaded) return const DshLoading();
     // 内核 GoalView 状态字段是 phase（active/paused/blocked/complete）
     final phase = (goal?['phase'] as String? ?? '').toString();
     String phaseLabel(String p) => switch (p) {
@@ -460,69 +485,108 @@ class _GoalTabState extends State<_GoalTab> {
           'complete' => L10n.t('已完成', 'Complete'),
           _ => p,
         };
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      children: [
-        if (goal == null || goal.isEmpty) ...[
-          Text(L10n.t('当前没有目标', 'No goal yet'), style: TextStyle(fontSize: 13, color: ink3)),
-          const SizedBox(height: 10),
+    final footnote = Text(
+      L10n.t('目标与 PC 端同源（goal 服务）；修改即时生效。',
+          'Goal data is synced with the desktop app (goal service); changes take effect immediately.'),
+      style: DshType.xxs12.copyWith(color: c.ink3),
+    );
+
+    if (goal == null || goal.isEmpty) {
+      return ListView(
+        padding: _tabPadding,
+        children: [
+          DshEmpty(
+            compact: true,
+            icon: Icons.flag_outlined,
+            title: L10n.t('当前没有目标', 'No goal yet'),
+          ),
+          const SizedBox(height: DshSpace.lg),
           TextField(
             controller: _objCtrl,
-            style: const TextStyle(fontSize: 13.5),
+            style: DshType.s14.copyWith(color: c.ink),
             maxLines: 2,
-            decoration: InputDecoration(
-              hintText: L10n.t('输入目标…', 'Enter a goal…'),
-              hintStyle: TextStyle(fontSize: 12.5, color: ink3),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: line)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: line)),
-            ),
+            decoration: InputDecoration(hintText: L10n.t('输入目标…', 'Enter a goal…')),
           ),
-          const SizedBox(height: 10),
-          FilledButton(
+          const SizedBox(height: DshSpace.md),
+          DshButton(
+            label: L10n.t('创建目标', 'Create Goal'),
+            icon: Icons.add,
+            variant: DshButtonVariant.primary,
+            expanded: true,
             onPressed: _busy ? null : () => _act('create', objective: _objCtrl.text.trim()),
-            child: Text(L10n.t('创建目标', 'Create Goal')),
           ),
-        ] else ...[
-          Text(
-            (goal['objective'] as String? ?? '').toString(),
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.5),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            [
-              '${L10n.t('轮次 ', 'Rounds: ')}${(goal['roundsStarted'] as num?)?.toInt() ?? 0}/${(goal['maxGoalRounds'] as num?)?.toInt() ?? '∞'}',
-              phaseLabel(phase),
-            ].join(' · '),
-            style: TextStyle(fontSize: 12, color: ink3),
-          ),
-          if (phase == 'blocked' && goal['blockedReason'] is Map) ...[
-            const SizedBox(height: 6),
-            Text(
-              ((goal['blockedReason'] as Map)['message'] as String? ?? '').toString(),
-              style: TextStyle(fontSize: 11.5, color: danger),
-            ),
-          ],
-          const SizedBox(height: 12),
-          Row(
+          const SizedBox(height: DshSpace.lg),
+          footnote,
+        ],
+      );
+    }
+
+    final rounds = (goal['roundsStarted'] as num?)?.toInt() ?? 0;
+    final maxRounds = (goal['maxGoalRounds'] as num?)?.toInt();
+    final (tagFg, tagBg) = _phaseTone(c, phase);
+    return ListView(
+      padding: _tabPadding,
+      children: [
+        DshCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _busy ? null : () => _act(phase == 'paused' ? 'resume' : 'pause'),
-                  child: Text(phase == 'paused' ? L10n.t('继续', 'Resume') : L10n.t('暂停', 'Pause'), style: TextStyle(fontSize: 13, color: brand)),
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      (goal['objective'] as String? ?? '').toString(),
+                      style: DshType.sStrong14.copyWith(color: c.ink),
+                    ),
+                  ),
+                  const SizedBox(width: DshSpace.sm),
+                  DshTag(label: phaseLabel(phase), color: tagFg, background: tagBg),
+                ],
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _busy ? null : () => _act('complete'),
-                  child: Text(L10n.t('标记完成', 'Mark Complete'), style: TextStyle(fontSize: 13, color: danger)),
+              const SizedBox(height: DshSpace.sm),
+              _meta('${L10n.t('轮次 ', 'Rounds: ')}$rounds/${maxRounds ?? '∞'}'),
+              if (maxRounds != null && maxRounds > 0) ...[
+                const SizedBox(height: DshSpace.sm),
+                DshProgressBar(value: rounds / maxRounds, color: c.business),
+              ],
+              if (phase == 'blocked' && goal['blockedReason'] is Map) ...[
+                const SizedBox(height: DshSpace.md),
+                DshBanner(
+                  message:
+                      ((goal['blockedReason'] as Map)['message'] as String? ?? '').toString(),
+                  icon: Icons.error_outline,
+                  tone: DshBannerTone.danger,
                 ),
+              ],
+              const SizedBox(height: DshSpace.lg),
+              Row(
+                children: [
+                  Expanded(
+                    child: DshButton(
+                      label: phase == 'paused' ? L10n.t('继续', 'Resume') : L10n.t('暂停', 'Pause'),
+                      variant: DshButtonVariant.outline,
+                      expanded: true,
+                      onPressed:
+                          _busy ? null : () => _act(phase == 'paused' ? 'resume' : 'pause'),
+                    ),
+                  ),
+                  const SizedBox(width: DshSpace.md),
+                  Expanded(
+                    child: DshButton(
+                      label: L10n.t('标记完成', 'Mark Complete'),
+                      variant: DshButtonVariant.primary,
+                      expanded: true,
+                      onPressed: _busy ? null : () => _act('complete'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
-        const SizedBox(height: 8),
-        Text(L10n.t('目标与 PC 端同源（goal 服务）；修改即时生效。', 'Goal data is synced with the desktop app (goal service); changes take effect immediately.'), style: TextStyle(fontSize: 11, color: ink3)),
+        ),
+        const SizedBox(height: DshSpace.md),
+        footnote,
       ],
     );
   }
