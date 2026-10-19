@@ -271,7 +271,9 @@ DocBlock? _tryParseCsv(String text) {
 // ══════════════════════════════════════════════════════════════════
 
 final _inlineRe = RegExp(
-  r'(\*\*[^*]+\*\*|\*[^*\s][^*]*\*|`[^`]+`|\[[^\]]*\]\([^)\s]+\)|https?://[^\s<>()\[\]{}"“”‘’]+)',
+  // v3.2.4：`![alt](src)` 必须排在链接前面 —— 否则 `[...](...)` 会先把 `!` 之后的部分吃掉，
+  // 图片就永远解析不出来（这正是「文档里图片只显示占位」的第一个原因）。
+  r'(!\[[^\]]*\]\([^)\s]+\)|\*\*[^*]+\*\*|\*[^*\s][^*]*\*|`[^`]+`|\[[^\]]*\]\([^)\s]+\)|https?://[^\s<>()\[\]{}"“”‘’]+)',
 );
 
 /// 行内解析（三层优先级：行内代码 → 公式 → 粗斜体/链接）。
@@ -316,7 +318,17 @@ List<DocInline> _mdInline(String text) {
   for (final m in _inlineRe.allMatches(text)) {
     if (m.start > last) out.add(DocText(text.substring(last, m.start)));
     final tok = m.group(0)!;
-    if (tok.startsWith('**')) {
+    if (tok.startsWith('![')) {
+      // v3.2.4：图片 `![alt](src)` → DocImage（渲染器会按路径/URL 真取图）
+      final im = RegExp(r'^!\[([^\]]*)\]\(([^)]*)\)$').firstMatch(tok);
+      if (im != null) {
+        final src = im.group(2)!.trim();
+        final alt = im.group(1)!.trim();
+        out.add(DocImage(src.isEmpty ? null : src, alt: alt.isEmpty ? null : alt));
+      } else {
+        out.add(DocText(tok));
+      }
+    } else if (tok.startsWith('**')) {
       out.add(DocText(tok.substring(2, tok.length - 2), bold: true));
     } else if (tok.startsWith('`')) {
       out.add(DocText(tok.substring(1, tok.length - 1), code: true));

@@ -211,6 +211,25 @@ class DshPalette {
   Color get scrollbar =>
       _dark ? const Color(0xFF545557) : const Color(0xFFE5E5E5);
 
+  // ---------- TUI 终端皮肤遗留令牌 ----------
+  //
+  // 这几个只服务于 `lib/tui.dart`（发行线 v3.2.5 那套 dsh-tui 皮肤控件库）。
+  // 默认界面已改用官方 Web 令牌，保留取值只为让那套控件仍能编译、日后若要接成
+  // 独立入口时不必再找回色值。数值沿用发行线定义，未做改动。
+
+  /// Electric Cyan —— 区块标题 / 流式（tui.dart）
+  Color get cyan => _dark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
+
+  /// Slate Indigo —— 徽章（tui.dart）
+  Color get indigo => _dark ? const Color(0xFF818CF8) : const Color(0xFF4F46E5);
+
+  /// 弱化文字（tui.dart）
+  Color get muted => _dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+
+  /// 终端面板底（tui.dart）
+  Color get panel =>
+      _dark ? const Color(0xFF0E121A) : const Color(0xFFF7F9FB);
+
   /// 代码 diff 新增底（--dsw-alias-file-diff-added-bg）
   Color get diffAdded =>
       _dark ? const Color(0xFF1F3124) : const Color(0xFFE6F4E7);
@@ -615,6 +634,9 @@ class DshTheme {
   static const double radiusSm = DshRadius.sm;
   static const List<BoxShadow> shadow = DshShadow.lv1;
   static const List<BoxShadow> shadowDark = DshShadow.lv1;
+
+  /// 等宽字体族名（`lib/tui.dart` 用；官方 Web 侧等宽走 [DshType.monoFallback]）。
+  static const String mono = 'monospace';
 
   /// 亮色主题。
   static ThemeData light() => _base(Brightness.light);
@@ -1039,4 +1061,10 @@ class DshColors {
   // ---------- 旧别名 ----------
   static Color surface(BuildContext c) => DshPalette.of(c).surface;
   static Color card(BuildContext c) => DshPalette.of(c).card;
+
+  // ---------- TUI 终端皮肤遗留令牌（只服务 lib/tui.dart） ----------
+  static Color cyan(BuildContext c) => DshPalette.of(c).cyan;
+  static Color indigo(BuildContext c) => DshPalette.of(c).indigo;
+  static Color muted(BuildContext c) => DshPalette.of(c).muted;
+  static Color panel(BuildContext c) => DshPalette.of(c).panel;
 }
