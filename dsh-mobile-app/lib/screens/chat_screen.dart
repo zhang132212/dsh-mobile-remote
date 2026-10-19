@@ -2363,16 +2363,66 @@ class _ChatScreenState extends State<ChatScreen> {
           // 消息流：live 视图（普通列表，最新在底部）或历史分段浏览；
           // 上翻时右下角浮出"回到底部"圆钮（位于输入框正上方，不在消息流内）
           Expanded(
-            child: Stack(
-              children: [
-                Positioned.fill(child: _inHistory ? _buildHistoryView() : _buildLiveView()),
-                if (!_inHistory)
-                  Positioned(
-                    bottom: DshSpace.md,
-                    right: DshSpace.md,
-                    child: _JumpToLatestButton(visible: _showJumpToLatest, onTap: _jumpToLatest),
-                  ),
-              ],
+            // 问询/审批卡浮在消息区底部（不再作为外层 Column 的直接子节点）。
+            // 原因（真机反馈 2026-10-19）：选项多的问询卡可以长到 500+ dp，作为
+            // Column 的固定子节点会把下方输入框挤出屏幕 —— 表现为「对话框超出屏幕、
+            // 取消/提交被裁掉」。浮层化之后卡片最多占满消息区（内部自己滚动），
+            // 输入框永远在屏内；键盘弹起时消息区变矮，卡片跟着变矮。
+            child: LayoutBuilder(
+              builder: (context, box) {
+                final cardMax =
+                    (box.maxHeight - DshSpace.md).clamp(160.0, double.infinity);
+                return Stack(
+                  children: [
+                    Positioned.fill(child: _inHistory ? _buildHistoryView() : _buildLiveView()),
+                    if (!_inHistory)
+                      Positioned(
+                        bottom: DshSpace.md,
+                        right: DshSpace.md,
+                        child: _JumpToLatestButton(visible: _showJumpToLatest, onTap: _jumpToLatest),
+                      ),
+                    // 内核问询（思考中途需要你拍板，与 PC 端同一 pending 通道）
+                    if (_question != null)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: HarnessQuestionCard(
+                          // v3.1.6（app-audit ①5）：按 rpcId 给 key —— 同一会话连续两条
+                          // 问询若中间没有一帧 `_question == null`（store 的 per-session
+                          // pending 是覆盖式写入），无 key 时 Flutter 会复用同一个 State：
+                          // 它按旧问询 id 建的 _selected/_ctrls 找不到新 id →
+                          // `_selected[q.id]!` 抛 null-check 异常（整页构建失败）。
+                          key: ValueKey<String>(_question!.rpcId),
+                          request: _question!,
+                          maxHeight: cardMax,
+                          onCancel: () {
+                            // 立即收起卡片（内核 resolved 帧可能因本地状态已清而不再转发）
+                            final rpc = _question!.rpcId;
+                            setState(() => _question = null);
+                            unawaited(_cancelPending(rpc));
+                          },
+                          onSubmitted: _submitQuestion,
+                        ),
+                      ),
+                    if (_approval != null)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: _ApprovalCard(
+                          request: _approval!,
+                          onDecide: _decideApproval,
+                          onCancel: () {
+                            final rpc = _approval!.rpcId;
+                            setState(() => _approval = null);
+                            unawaited(_cancelPending(rpc));
+                          },
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
           ),
           // 活动条：思考中 / 工具执行中（过程反馈，不依赖任何开关）
@@ -2384,33 +2434,6 @@ class _ChatScreenState extends State<ChatScreen> {
               showContent: widget.store.showReasoning,
               tools: _activeTools.values.toList(),
               onToggleReasoning: () => setState(() => _reasoningExpanded = !_reasoningExpanded),
-            ),
-          // 内核问询/审批弹窗（思考中途需要你拍板，与 PC 端同一 pending 通道）
-          if (_question != null)
-            HarnessQuestionCard(
-              // v3.1.6（app-audit ①5）：按 rpcId 给 key —— 同一会话连续两条问询若中间没有
-              // 一帧 `_question == null`（store 的 per-session pending 是覆盖式写入），
-              // 无 key 时 Flutter 会复用同一个 State：它按旧问询 id 建的 _selected/_ctrls
-              // 找不到新 id → `_selected[q.id]!` 抛 null-check 异常（整页构建失败）。
-              key: ValueKey<String>(_question!.rpcId),
-              request: _question!,
-              onCancel: () {
-                // 立即收起卡片（内核 resolved 帧可能因本地状态已清而不再转发）
-                final rpc = _question!.rpcId;
-                setState(() => _question = null);
-                unawaited(_cancelPending(rpc));
-              },
-              onSubmitted: _submitQuestion,
-            ),
-          if (_approval != null)
-            _ApprovalCard(
-              request: _approval!,
-              onDecide: _decideApproval,
-              onCancel: () {
-                final rpc = _approval!.rpcId;
-                setState(() => _approval = null);
-                unawaited(_cancelPending(rpc));
-              },
             ),
           // 快捷动作
           if (store.actions.isNotEmpty)

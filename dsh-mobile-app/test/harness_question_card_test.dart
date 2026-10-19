@@ -91,4 +91,79 @@ void main() {
     expect(result, [{'id': 'first', 'selected': ['方案 A']}, {'id': 'second', 'selected': [], 'custom': '第二题答案'}]);
     expect(tester.takeException(), isNull);
   });
+
+  // 真机反馈（2026-10-19）：选项一多，问询卡会超出屏幕，取消/提交被裁掉。
+  // 根因是卡片当时作为聊天页 Column 的固定子节点、高度按「屏高 55%」估算；
+  // 现在它是消息区底部的浮层，高度由调用方按可用区域给（maxHeight），内部自己滚动。
+  testWidgets('选项很多时卡片不超过给定高度，底栏按钮仍在屏内（回归：对话框超出屏幕）', (tester) async {
+    tester.view.physicalSize = const Size(390, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final req = request([
+      AskQuestion(
+        id: 'q',
+        header: '测试确认',
+        question: '接下来要做什么？',
+        multiSelect: false,
+        options: List.generate(
+          8,
+          (i) => AskOption(label: '选项 $i', description: '这一项的第 $i 条说明文字'),
+        ),
+      ),
+    ]);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: reviewTheme(false),
+      home: Scaffold(
+        // 复刻生产结构：消息区（Expanded + Stack）+ 底部输入框，卡片浮在消息区底部
+        body: Column(
+          children: [
+            Expanded(
+              child: Stack(
+                children: [
+                  const Positioned.fill(child: SizedBox.expand()),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: HarnessQuestionCard(
+                      request: req,
+                      maxHeight: 300,
+                      onCancel: () {},
+                      onSubmitted: (_) async {},
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(
+              height: 72,
+              child: ColoredBox(
+                color: Color(0xFFEEEEEE),
+                child: Center(child: Text('composer')),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ));
+
+    // 卡片高度受 maxHeight 约束
+    final cardRect = tester.getRect(find.byType(HarnessQuestionCard));
+    expect(cardRect.height, lessThanOrEqualTo(300.5), reason: '卡片高度应受 maxHeight 约束');
+
+    // 不能压到下方输入框：卡片底边 ≤ 输入框顶边
+    final composerTop = tester.getRect(find.text('composer')).top;
+    expect(cardRect.bottom, lessThanOrEqualTo(composerTop + 0.5),
+        reason: '问询卡越界压到了输入框（真机表现：取消/提交被裁掉）');
+
+    // 底栏两个按钮在屏内
+    expect(tester.getRect(find.text('取消')).bottom, lessThanOrEqualTo(700));
+    expect(tester.getRect(find.text('提交')).bottom, lessThanOrEqualTo(700));
+
+    // 布局不应抛 overflow
+    expect(tester.takeException(), isNull);
+  });
 }

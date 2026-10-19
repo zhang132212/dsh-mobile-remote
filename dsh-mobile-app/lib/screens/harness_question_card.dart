@@ -14,8 +14,22 @@ class HarnessQuestionCard extends StatefulWidget {
   final QuestionRequest request;
   final VoidCallback onCancel;
   final Future<void> Function(List<Map<String, dynamic>> answers) onSubmitted;
+
+  /// 卡片最大高度。
+  ///
+  /// 调用方（聊天页）按**可用区域**传进来：问询卡是浮在消息区底部的浮层，
+  /// 高度必须跟着消息区走，否则选项一多就会把输入框挤出屏幕（真机反馈）。
+  /// 不传时退回「屏高 55%」的旧估算，供独立使用。
+  final double? maxHeight;
+
   // v3.1.6（app-audit ①5）：支持 key——聊天页按 rpcId 传 ValueKey，换问询时强制新建 State
-  const HarnessQuestionCard({super.key, required this.request, required this.onCancel, required this.onSubmitted});
+  const HarnessQuestionCard({
+    super.key,
+    required this.request,
+    required this.onCancel,
+    required this.onSubmitted,
+    this.maxHeight,
+  });
 
   @override
   State<HarnessQuestionCard> createState() => HarnessQuestionCardState();
@@ -111,7 +125,14 @@ class HarnessQuestionCardState extends State<HarnessQuestionCard> {
     final questions = widget.request.questions;
     final q = questions.isEmpty ? null : questions[_page];
     final media = MediaQuery.of(context);
-    final height = ((media.size.height - media.viewInsets.bottom) * 0.55).clamp(180.0, 520.0);
+    // 优先用调用方给的可用高度（浮层场景）；否则退回旧的「屏高 55%」估算
+    // 并减去键盘高度 —— 键盘弹起时可用高度会变小，卡片必须跟着缩。
+    final double height;
+    if (widget.maxHeight != null) {
+      height = widget.maxHeight!.clamp(120.0, double.infinity);
+    } else {
+      height = ((media.size.height - media.viewInsets.bottom) * 0.55).clamp(180.0, 520.0);
+    }
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: height),
       // 官方卡片：R20 + layer2 填充 + 0.5px 发丝边，不叠投影
