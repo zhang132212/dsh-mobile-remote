@@ -207,7 +207,9 @@ void _emitBlocks(_Node parent, List<DocBlock> out, [_Inline style = const _Inlin
     if (tag.length == 2 && tag[0] == 'h' && '123456'.contains(tag[1])) {
       final level = int.parse(tag[1]);
       final spans = _inlineOf(child, style);
-      if (spans.isNotEmpty) out.add(DocHeading(level, spans));
+      if (spans.isNotEmpty) {
+        out.add(DocHeading(level, spans, anchor: _anchorOf(child)));
+      }
       continue;
     }
 
@@ -227,7 +229,13 @@ void _emitBlocks(_Node parent, List<DocBlock> out, [_Inline style = const _Inlin
       case 'dt':
       case 'caption':
         final spans = _inlineOf(child, style);
-        if (spans.isNotEmpty) out.add(DocPara(spans));
+        final anchor = _anchorOf(child);
+        if (spans.isNotEmpty) {
+          out.add(DocPara(spans, anchor: anchor));
+        } else if (anchor != null) {
+          // 空容器只当锚点用（HTML 导出里常见的 <div id="sec"></div>）
+          out.add(DocPara(const [], anchor: anchor));
+        }
         // 容器里还可能有块级子元素（div 套 div），继续下钻
         if (child.children.any((c) => !c.isText && _isBlock(c.tag))) {
           _emitBlocks(child, out, style);
@@ -294,7 +302,13 @@ void _emitBlocks(_Node parent, List<DocBlock> out, [_Inline style = const _Inlin
           // 行内标签直接挂在顶层（少见但别丢）。必须包一层再收集，
           // 否则 <a>/<img> 自身的语义（链接、图片）会在 _inlineOf 里丢掉。
           final spans = _inlineOf(_wrap(child), style);
-          if (spans.isNotEmpty) out.add(DocPara(spans));
+          final anchor = _anchorOf(child);
+          if (spans.isNotEmpty) {
+            out.add(DocPara(spans, anchor: anchor));
+          } else if (anchor != null) {
+            // <a id="x"></a> / <span id="x"></span> 这类纯锚点
+            out.add(DocPara(const [], anchor: anchor));
+          }
         }
     }
   }
@@ -314,6 +328,14 @@ const Set<String> _blockTagSet = {
 };
 
 bool _isBlock(String tag) => _blockTagSet.contains(tag);
+
+/// 取块元素的锚点 id（标准 id；兼容老式 <a name>）。
+String? _anchorOf(_Node n) {
+  final id = n.attrs['id'] ?? n.attrs['name'];
+  if (id == null) return null;
+  final t = id.trim();
+  return t.isEmpty ? null : t;
+}
 
 /// 收集一个节点下的行内内容。
 List<DocInline> _inlineOf(_Node node, _Inline style) {
@@ -377,7 +399,8 @@ void _collectInline(_Node node, _Inline style, List<DocInline> out) {
         final href = child.attrs['href'];
         final label = _inlineOf(child, style);
         if (label.isNotEmpty) {
-          out.add(DocLink(label, (href == null || href.isEmpty || href.startsWith('#')) ? null : href));
+          // 保留 #hash：阅读页据此做页内锚点跳转（v3.2.12）
+          out.add(DocLink(label, (href == null || href.isEmpty) ? null : href));
         }
         break;
       case 'img':

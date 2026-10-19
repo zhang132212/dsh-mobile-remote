@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.2.12（2026-10-20）— HTML 文档里的链接真的能点了
+
+> 版本：App `3.2.12+35` / 插件 `3.1.5-eun.1`。
+> 验收门槛：`flutter analyze`（0 issue）。`flutter test`（330 全部通过）。
+
+- **正文内链接的「基准」补上了**：以前点 HTML / Markdown 里的相对链接（`href="other.html"`、`./sub/page.md`、`../up.html`、`/abs.html`）只会弹「非网页链接」；现在按文档所在位置解析：
+  - 电脑工作区里的本地文档 → 解析成同目录 / 子目录 / 盘符根下的绝对路径，**在阅读抽屉里就地打开**目标文档（HTML→HTML、HTML→md/json/xml 可以连续读）；
+  - http(s) 网络文档 → 按文档 URL 解析成绝对地址，再决定「就地读」还是「交浏览器」；
+  - `file:///C:/…`、Windows 绝对路径（`C:\…` / `C:/…`）同样可以直接打开。
+- **页内锚点（#hash）可点**：HTML 的 `id`（兼容老式 `<a name>`）现在会带进文档模型，点 `<a href="#install">` 会滚动到对应标题/段落；找不到锚点会明确提示，不静默。
+- **外链回退更合理**：`http(s)` 外链仍交浏览器；`mailto:` / `tel:` 交给系统应用（此前统一弹「非网页链接」）；危险 scheme（`javascript:` 等）保持不拉起。
+- **可点性更明显**：正文链接加细下划线 + 完整点击热区，一眼能看出哪里能点。
+- 回归：新增 `test/docs_html_links_test.dart` 8 例（本地/网络相对链接、根相对、Windows 绝对路径、file URI、页内锚点、点击链路）；`DocHeading` / `DocPara` 新增 `anchor` 字段。
 ## v3.2.11（2026-10-20）— 文档阅读器升级：HTML / SVG / XML / JSON 就地读取
 
 > 版本：App `3.2.11+34` / 插件 `3.1.5-eun.1`。

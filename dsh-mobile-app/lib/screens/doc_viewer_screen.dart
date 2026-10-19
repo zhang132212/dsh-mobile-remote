@@ -73,6 +73,10 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
   final _outline = <(int, String)>[];
   final _outlineBlockIndex = <int>[];
 
+  /// HTML 文档内锚点 id → 块 GlobalKey（#hash 链接跳转用）。
+  final _anchorKeys = <String, GlobalKey>{};
+  bool _anchorsReady = false;
+
   /// 树形结构（XML / JSON）的展开状态——放在页面 state 里，
   /// 「更多」菜单和正文树共享同一份；滚动 / 改字号重建不丢。
   final _treeCtrl = DocTreeController();
@@ -149,6 +153,40 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         _outline.add((b.level, text));
         _outlineBlockIndex.add(i);
       }
+    }
+  }
+
+  /// 收集 HTML 文档内锚点（id）→ 块 GlobalKey，供 #hash 链接跳转。
+  ///
+  /// 与目录共用同一份 block key 表：一个块同时是标题和锚点时不会抢 key。
+  void _ensureAnchors(Document doc) {
+    if (_anchorsReady) return;
+    _anchorsReady = true;
+    for (var i = 0; i < doc.blocks.length; i++) {
+      final anchor = switch (doc.blocks[i]) {
+        DocHeading(:final anchor) => anchor,
+        DocPara(:final anchor) => anchor,
+        _ => null,
+      };
+      if (anchor == null || anchor.isEmpty) continue;
+      _anchorKeys[anchor] = _headingKeys[i] ??= GlobalKey();
+    }
+  }
+
+  /// 跳转到文档内锚点（找不到时给一句人话提示，不静默）。
+  void _jumpAnchor(String anchor) {
+    final key = _anchorKeys[anchor] ?? _anchorKeys[Uri.decodeComponent(anchor)];
+    if (key == null) {
+      showToast(context, L10n.t('未找到锚点 #$anchor', 'Anchor not found: #$anchor'));
+      return;
+    }
+    final target = key.currentContext;
+    if (target != null) {
+      Scrollable.ensureVisible(
+        target,
+        duration: const Duration(milliseconds: 240),
+        alignment: 0.02,
+      );
     }
   }
 
@@ -308,7 +346,10 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
   Widget build(BuildContext context) {
     final c = DshPalette.of(context);
     final doc = _doc;
-    if (doc != null) _ensureOutline(doc);
+    if (doc != null) {
+      _ensureOutline(doc);
+      _ensureAnchors(doc);
+    }
 
     if (widget.embedded) {
       // 抽屉模式：紧凑头部 + 正文。对话在抽屉下面保持存活，划下去就回到聊天。
@@ -467,6 +508,7 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
       baseDir: widget.remotePath == null ? null : p.windows.dirname(widget.remotePath!),
       baseUrl: widget.httpUrl,
       tree: _treeCtrl,
+      onAnchor: _jumpAnchor,
     );
 
     // 电子表格：多表用胶囊选择器切换

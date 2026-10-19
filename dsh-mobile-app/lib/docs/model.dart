@@ -21,7 +21,11 @@ sealed class DocBlock {
 class DocHeading extends DocBlock {
   final int level;
   final List<DocInline> spans;
-  const DocHeading(this.level, this.spans);
+
+  /// 文档内锚点 id（HTML 的 id / name 属性）；无则为 null。
+  /// 阅读页用它响应当前文件内的 #hash 链接跳转。
+  final String? anchor;
+  const DocHeading(this.level, this.spans, {this.anchor});
 }
 
 /// 普通段落。
@@ -30,7 +34,10 @@ class DocPara extends DocBlock {
 
   /// 'left' | 'center' | 'right' | 'justify' | null（docx 段落对齐）
   final String? align;
-  const DocPara(this.spans, {this.align});
+
+  /// 文档内锚点 id（HTML 的 id / name 属性）；无则为 null。
+  final String? anchor;
+  const DocPara(this.spans, {this.align, this.anchor});
 }
 
 /// 列表（有序/无序，支持一层嵌套项内的行内格式）。

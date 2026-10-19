@@ -46,12 +46,16 @@ class DocRenderCtx {
   /// 「全部展开 / 全部折叠」和正文里的单节点点击要共享同一份状态，
   /// 下拉重建（滚动 / 改字号）时也不该把用户展开的层级丢掉。
   final DocTreeController? tree;
+
+  /// 页内锚点（HTML #hash）跳转回调：阅读页提供，负责滚到对应块。
+  final void Function(String anchor)? onAnchor;
   const DocRenderCtx({
     this.scale = 1.0,
     this.api,
     this.baseDir,
     this.baseUrl,
     this.tree,
+    this.onAnchor,
   });
 
   /// 正文实际字号：官方 Markdown 正文令牌 × 阅读缩放。
@@ -110,6 +114,115 @@ Future<void> openDocLink(BuildContext context, String url) async {
   if (!ok && context.mounted) {
     showToast(context, L10n.t('无法打开链接', 'Cannot open link'));
   }
+}
+
+/// 把文档里的 href 解析成可打开的绝对地址（相对链接的「基准」在这里补上）。
+///
+/// 支持：
+///   · 绝对外链 http(s) / dsh-doc: —— 原样返回；
+///   · file:///C:/… —— 转成 dsh-doc: 本地文档；
+///   · 网络文档：相对 / 根相对路径 → 按 [DocRenderCtx.baseUrl] 解析成 http(s)；
+///   · 本地文档：相对 / 根相对 / Windows 绝对路径 → 按 [DocRenderCtx.baseDir] 解析成电脑绝对路径。
+/// 页内锚点（#…）与无法定位的裸相对链接返回 null，由调用方走回退逻辑。
+String? resolveDocHref(String href, DocRenderCtx ctx) {
+  final raw = href.trim();
+  if (raw.isEmpty || raw.startsWith('#')) return null;
+  final pathPart = _hrefPathPart(raw);
+  // Windows 绝对路径（C:\… / C:/…）先于 scheme 判断：否则 C: 会被 URI 当成 scheme。
+  if (RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(pathPart)) {
+    return 'dsh-doc:${Uri.encodeFull(p.windows.normalize(pathPart))}';
+  }
+  final uri = Uri.tryParse(raw);
+  if (uri != null && uri.hasScheme) {
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme == 'http' || scheme == 'https' || scheme == 'dsh-doc') return raw;
+    if (scheme == 'file') {
+      try {
+        final path = uri.toFilePath(windows: true);
+        if (path.isNotEmpty) return 'dsh-doc:${Uri.encodeFull(path)}';
+      } catch (_) {
+        // 非法 file URI：按不可解析处理
+      }
+      return null;
+    }
+    return null;
+  }
+  // ① 网络文档：相对路径按文档 URL 解析
+  final baseUrl = ctx.baseUrl;
+  if (baseUrl != null && baseUrl.isNotEmpty) {
+    final base = Uri.tryParse(baseUrl);
+    if (base != null) {
+      final resolved = base.resolve(raw);
+      if (resolved.scheme == 'http' || resolved.scheme == 'https') {
+        return resolved.toString();
+      }
+    }
+  }
+  // ② 本地文档：相对路径按文档所在目录解析
+  final baseDir = ctx.baseDir;
+  if (baseDir != null && baseDir.isNotEmpty) {
+    final String absolute;
+    if (pathPart.startsWith('/')) {
+      // 根相对：挂到文档所在盘符根（本地 HTML 导出常见形态）
+      final drive = baseDir.length >= 2 && baseDir[1] == ':' ? baseDir.substring(0, 2) : '';
+      absolute = p.windows.normalize('$drive/$pathPart');
+    } else {
+      absolute = p.windows.normalize(p.windows.join(baseDir, pathPart));
+    }
+    return 'dsh-doc:${Uri.encodeFull(absolute)}';
+  }
+  return null;
+}
+
+/// 取 href 的路径部分（去掉 ?query 与 #fragment，并做百分号解码）。
+String _hrefPathPart(String raw) {
+  final noQuery = raw.split('?').first;
+  final noFrag = noQuery.split('#').first;
+  try {
+    return Uri.decodeComponent(noFrag);
+  } catch (_) {
+    return noFrag;
+  }
+}
+
+/// 点击正文内链接（HTML / markdown 共用）。
+///
+/// 先把相对链接按文档基址解析成绝对地址：本地文件 → 就地打开电脑上的目标文档，
+/// 网络文档 → 绝对 URL 再决定「就地读」还是「交浏览器」。页内 #hash 交给阅读页跳锚点。
+Future<void> _openInlineLink(BuildContext context, String href, DocRenderCtx ctx) async {
+  final raw = href.trim();
+  if (raw.isEmpty) return;
+  if (raw.startsWith('#')) {
+    final anchor = Uri.decodeComponent(raw.substring(1));
+    final jump = ctx.onAnchor;
+    if (jump != null && anchor.isNotEmpty) {
+      jump(anchor);
+      return;
+    }
+    showToast(context, L10n.t('页内锚点：$raw', 'In-page anchor: $raw'));
+    return;
+  }
+  final resolved = resolveDocHref(raw, ctx);
+  if (resolved != null) {
+    await openDocLink(context, resolved);
+    return;
+  }
+  // 回退：普通外链（http(s) 交浏览器；mailto/tel 交系统应用）
+  Uri uri;
+  try {
+    uri = Uri.parse(raw);
+  } catch (_) {
+    showToast(context, L10n.t('链接无法解析', 'Unresolvable link'));
+    return;
+  }
+  if (uri.scheme == 'http' || uri.scheme == 'https' || uri.scheme == 'mailto' || uri.scheme == 'tel') {
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) {
+      showToast(context, L10n.t('无法打开链接', 'Cannot open link'));
+    }
+    return;
+  }
+  showToast(context, L10n.t('非网页链接：$raw', 'Not a web link: $raw'));
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -366,20 +479,23 @@ List<InlineSpan> inlineSpans(BuildContext c, List<DocInline> spans, TextStyle ba
 
       case DocLink(:final spans, :final url):
         final label = spans.map((e) => e is DocText ? e.text : '').join();
-        if (url == null) {
+        if (url == null || url.trim().isEmpty) {
           out.add(TextSpan(text: label, style: base));
         } else {
           out.add(WidgetSpan(
             alignment: PlaceholderAlignment.baseline,
             baseline: TextBaseline.alphabetic,
             child: GestureDetector(
-              onTap: () => openDocLink(c, url),
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _openInlineLink(c, url, ctx),
               child: Text(
                 label.isEmpty ? url : label,
-                // 链接：link 色 + w500，静止态无下划线（官方规则）
+                // 链接：link 色 + w500 + 细下划线 —— 文档里一眼能看出「这点得动」
                 style: base.copyWith(
                   color: palette.link,
                   fontWeight: FontWeight.w500,
+                  decoration: TextDecoration.underline,
+                  decorationColor: palette.link.withValues(alpha: 0.45),
                 ),
               ),
             ),
