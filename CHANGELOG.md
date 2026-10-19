@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.2.9（2026-10-19）— 修复标题栏被手机状态栏遮挡
+
+> 版本：App `3.2.9+32` / 插件 `3.1.5-eun.1`。
+> 验收门禁：`flutter analyze`（0 issue）、`flutter test`（298 全部通过）。
+
+- **现象**（真机反馈，v3.2.8 引入的回归）：对话页、用量与额度等页面的标题被手机状态栏（时间 / 信号 / 电量）压住。
+- **根因**：v3.2.8 把 Material `AppBar` 换成自绘标题栏时只还原了几何，漏了状态栏内边距 —— `Scaffold` 会把 `preferredSize.height + MediaQuery.padding.top` 一起预留给 appBar，Material 的 `AppBar` 自己补那段内边距，自绘版本没补，于是内容从 y=0 开始画。
+- **修复**：`DshAppBar` 新增 `primary`（默认 `true`）——为 true 时自己吃掉 `MediaQuery.padding.top`；嵌在抽屉/弹层里的用法（文档阅读页的嵌入式头部）传 `primary: false`，安全区交给外层，避免重复内缩。
+- 回归：`test/appbar_safe_area_test.dart`（3 例，用 24px 状态栏的 `MediaQuery` 模拟真机）。已做红→绿验证：退回旧写法时首例报「标题顶边 12.0 落在状态栏（24.0）里」。
+
 ## v3.2.8（2026-10-19）— 官方 DSH 风格 UI 重构 + 并入发行线 v3.2.7
 
 > 版本：App `3.2.8+31` / 插件 `3.1.5-eun.1`。
