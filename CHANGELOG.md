@@ -1,8 +1,25 @@
 # Changelog
 
-## 未发布 — 界面重构：全面对齐官方 DeepSeek Harness 设计令牌
+## v3.2.8（2026-10-19）— 官方 DSH 风格 UI 重构 + 并入发行线 v3.2.7
 
-> 范围：`dsh-mobile-app/`（Flutter App）与 `lib/client.js`（桌面设置页模块）。**行为零变更**：只重写呈现层，公共类名、构造函数签名、回调语义、状态与网络逻辑一律未动；验收门禁 `flutter analyze`（0 issue）、`flutter test`（既有全量用例 + 新增 UI 画廊）。
+> 版本：App `3.2.8+31` / 插件 `3.1.5-eun.1`。
+> 验收门禁：`flutter analyze`（0 issue）、`flutter test`（295 全部通过）、`git rev-list HEAD..v3.2.7`（0，发行线已完全并入）。
+
+### 合并：发行线 v3.2.7 的功能全部并入 main
+
+`main` 与发行线在 `1808ada`（09-29）分叉过；本次将发行线 7 个提交的功能全部并入，**不丢任何修复与功能**：
+
+- **严重修复**（`677bad5`）：整行 `/"…"/` 公式让整条回答永久不显示 —— `md.dart` 该分支 `continue` 前漏 `i++`，死循环撑爆堆（真机 OOM）；同时修掉「先记缓存键再解析」的放大器，富渲染失败降级纯文本，`_blocks!` 全面改空安全。回归 `test/md_loop_regression_test.dart`（4 例）。
+- 新建会话 `provider` + `model` 一起发（`f7b790e`）：修新版服务端 `400 provider and model required together`。
+- 检查更新直链被阻断时改走 GitHub API 资产地址兜底（`69dfa30`）。
+- 文档内图片真渲染（`b0dc3e2`）：markdown 图片解析 + `DocImageView` 取图链路，新增依赖 `path`；回归 `test/docs_image_test.dart`（7 例）。
+- 桌面端 md→docx 转换器（`945e884`）；`publicUrls` 多设备/穿透入口播报（`b17c1c8` 的 `lib/index.js` 部分）。
+- **按决定丢弃** `b17c1c8` 的 TUI 终端皮肤呈现层（`theme.dart` / `chat_screen` / `home_screen` / `main` 取官方 DSH 令牌版本）；`lib/tui.dart` 控件库保留可编译，当前无入口，日后可接成独立视图。
+- 顺带修复：发行线的 `pubspec.yaml` 中文注释是 GBK→UTF-8 乱码，以正确文案重写（仅保留版本号与 `path` 依赖的功能改动）。
+
+### 界面重构：全面对齐官方 DeepSeek Harness 设计令牌
+
+> 范围：`dsh-mobile-app/`（Flutter App）与 `lib/client.js`（桌面设置页模块）。**行为零变更**：只重写呈现层，公共类名、构造函数签名、回调语义、状态与网络逻辑一律未动。
 
 ### 设计令牌层（重写 `lib/theme.dart`、新增 `lib/dsh_kit.dart`）
 
