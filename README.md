@@ -95,7 +95,7 @@
 
 ## 安装（部署者 3 步）
 
-> 🤖 **让 DSH 的 agent 自动安装**：直接告诉 agent「按本仓库 docs/06 安装 dsh-mobile-remote 插件」即可。main 为维护分支，可能包含发布后的改动；安装已发布的配套代码时，应按 Release tag 锁定。例如 v3.2.9，把依赖写成 `"dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.9"`。
+> 🤖 **让 DSH 的 agent 自动安装**：直接告诉 agent「按本仓库 docs/06 安装 dsh-mobile-remote 插件」即可。main 为维护分支，可能包含发布后的改动；安装已发布的配套代码时，应按 Release tag 锁定。例如 v3.2.10，把依赖写成 `"dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.10"`。
 
 ### 方式一：命令行 dsh web（web 版流程）
 
@@ -245,7 +245,7 @@ pushUrls:
 
 ## 版本与兼容
 
-- **分离版本**：App 版本由 `dsh-mobile-app/pubspec.yaml` 定义，插件版本由根目录 `package.json` 定义，两者独立演进。Release/git tag 标识一组发布代码，当前 tag 跟随 App 版本，不要求等于插件版本。当前正式 Release **[`v3.2.9`](https://github.com/zhang132212/dsh-mobile-remote/releases/tag/v3.2.9)** 对应 **App `3.2.9+32` + 插件 `3.1.5-eun.1`**；请从同一 Release 下载 `.apk` 和插件 `.tgz` 附件，以附件实际名称为准。该 Release 附带签名清单 `update.json`，App 的「检查更新」据此校验版本与 sha256。
+- **分离版本**：App 版本由 `dsh-mobile-app/pubspec.yaml` 定义，插件版本由根目录 `package.json` 定义，两者独立演进。Release/git tag 标识一组发布代码，当前 tag 跟随 App 版本，不要求等于插件版本。当前正式 Release **[`v3.2.10`](https://github.com/zhang132212/dsh-mobile-remote/releases/tag/v3.2.10)** 对应 **App `3.2.10+33` + 插件 `3.1.5-eun.1`**；请从同一 Release 下载 `.apk` 和插件 `.tgz` 附件，以附件实际名称为准。该 Release 附带签名清单 `update.json`，App 的「检查更新」据此校验版本与 sha256。
 - **版本差矩阵**（一句话：谁旧谁吃亏，但都不崩）：
 
 | 组合 | 结果 |
@@ -255,7 +255,7 @@ pushUrls:
 | App 新 + 插件旧 | ✅ 老功能正常，新功能提示升级 |
 | 破坏性变更 | ❌ 禁止——已发布接口只加字段（docs/08 约定） |
 
-- 插件源码按 git tag 锁定版本：`"dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.9"`（不带 `#` 跟随默认分支，不保证与某个 Release 完全一致）。
+- 插件源码按 git tag 锁定版本：`"dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.10"`（不带 `#` 跟随默认分支，不保证与某个 Release 完全一致）。
 - 实际配对可在 App **设置 → 关于 → 版本**（`App vX · 插件 vY`）或环境诊断页对照。
 
 ## 文档
