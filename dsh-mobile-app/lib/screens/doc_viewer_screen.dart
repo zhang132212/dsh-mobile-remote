@@ -315,6 +315,8 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
     return DshAppBar(
       title: widget.name.split(RegExp(r'[\\/]')).last,
       automaticallyImplyLeading: false,
+      // 嵌在抽屉/弹层里，安全区由外层负责；这里不能再吃一次状态栏高度。
+      primary: false,
       leading: Icon(Icons.drag_handle, size: 18, color: c.ink3),
       actions: [
         ..._actions(doc),

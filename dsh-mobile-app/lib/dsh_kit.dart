@@ -67,6 +67,7 @@ class DshAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.height = 52,
     this.automaticallyImplyLeading = true,
     this.centerTitle = false,
+    this.primary = true,
   }) : assert(title != null || titleWidget != null, '标题或标题组件二选一');
 
   final String? title;
@@ -80,6 +81,15 @@ class DshAppBar extends StatelessWidget implements PreferredSizeWidget {
   final double height;
   final bool automaticallyImplyLeading;
   final bool centerTitle;
+
+  /// 是否是「页面主标题栏」（放在 `Scaffold.appBar` 里）。
+  ///
+  /// 为 true 时自己吃掉状态栏高度（`MediaQuery.padding.top`）——这不是可选项：
+  /// Material 的 `Scaffold` 会把 `preferredSize.height + 状态栏高度` 一起预留给
+  /// appBar，`AppBar` 自己补这段内边距；自绘标题栏不补就会出现
+  /// 「标题被手机状态栏（时间/电量/信号）压住」。
+  /// 嵌在抽屉/弹层等已有安全区的容器里时传 false，避免重复内缩。
+  final bool primary;
 
   @override
   Size get preferredSize => Size.fromHeight(
@@ -105,13 +115,20 @@ class DshAppBar extends StatelessWidget implements PreferredSizeWidget {
     // 不用 Material 的 AppBar：它内部的 Column(mainAxisAlignment.spaceBetween)
     // 在高度无界处（嵌进可滚动区域/自定义弹层）会抛 RenderFlex 约束错误。
     // 这里用固定高度的 SizedBox 自绘，作为 Scaffold.appBar 时行为一致。
+    //
+    // 但有一件事必须自己接管：状态栏高度。Scaffold 会预留
+    // `preferredSize.height + MediaQuery.padding.top`， Material AppBar 自己
+    // 补这段内边距；不补的话标题就会被手机状态栏（时间/信号/电量）压住。
+    final topInset = primary ? MediaQuery.paddingOf(context).top : 0.0;
     return Material(
       color: c.bg,
-      child: SizedBox(
-        height: preferredSize.height,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+      child: Padding(
+        padding: EdgeInsets.only(top: topInset),
+        child: SizedBox(
+          height: preferredSize.height,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
             SizedBox(
               height: height,
               child: Row(
@@ -146,6 +163,7 @@ class DshAppBar extends StatelessWidget implements PreferredSizeWidget {
             if (bottom == null && showDivider)
               Container(height: DshStroke.hairline, color: c.line2),
           ],
+        ),
         ),
       ),
     );
