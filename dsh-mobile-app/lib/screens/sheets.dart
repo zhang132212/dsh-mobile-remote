@@ -418,11 +418,18 @@ Future<void> showNewSessionSheet(
         if (ok != true) return; // finally 会复位 creating
         permConfirmed = true;
       }
+      // v3.2.6：新建会话必须携带完整模型身份（provider + model）——旧实现只发 model，
+      // 新版服务端插件（≥3.2.0）会 400 "provider and model required together"。
+      // 要么两者都发，要么都不发（由服务端用部署默认模型），不发送已下线的兜底 model id。
+      final selModel = store.sessionConfig.model;
+      final selProvider = store.sessionConfig.provider;
+      final hasModelSelection = selModel != null && selModel.isNotEmpty && selProvider != null && selProvider.isNotEmpty;
       final created = await api.createSession({
         'preset': preset,
         'cwd': ?pendingDir,
-        'model': store.sessionConfig.model ?? 'deepseek-v4-flash',
-        'reasoningEffort': store.sessionConfig.reasoningEffort ?? 'max',
+        if (hasModelSelection) 'provider': selProvider,
+        if (hasModelSelection) 'model': selModel,
+        if (hasModelSelection) 'reasoningEffort': store.sessionConfig.reasoningEffort ?? 'max',
         'permissionPreset': perm,
         if (perm == 'danger-full-access') 'confirmDanger': true,
       });
