@@ -372,7 +372,11 @@ class MainActivity : FlutterActivity() {
 
     private fun mimeOf(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
         "txt", "md", "log" -> "text/plain"
-        "json" -> "application/json"
+        // v3.2.11：数据结构 / 网页 / 矢量图（另存到系统下载目录时给出正确 MIME）
+        "json", "jsonc", "geojson", "webmanifest" -> "application/json"
+        "xml", "xsd", "xsl", "xslt", "plist", "rss", "atom", "kml", "csproj", "props", "resx", "pom", "xaml" -> "text/xml"
+        "html", "htm", "xhtml", "shtml" -> "text/html"
+        "svg" -> "image/svg+xml"
         "pdf" -> "application/pdf"
         "png" -> "image/png"
         "jpg", "jpeg" -> "image/jpeg"

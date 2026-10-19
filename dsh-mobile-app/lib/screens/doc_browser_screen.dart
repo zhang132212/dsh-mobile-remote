@@ -287,6 +287,11 @@ class _DocBrowserScreenState extends State<DocBrowserScreen> {
         DocFormat.docx => Icons.description_outlined,
         DocFormat.xlsx => Icons.table_chart_outlined,
         DocFormat.text => Icons.notes_outlined,
+        // v3.2.11：数据结构 / 网页 / 矢量图
+        DocFormat.xml => Icons.account_tree_outlined,
+        DocFormat.json => Icons.data_object,
+        DocFormat.html => Icons.language_outlined,
+        DocFormat.svg => Icons.brush_outlined,
         DocFormat.unknown => Icons.insert_drive_file_outlined,
       };
 

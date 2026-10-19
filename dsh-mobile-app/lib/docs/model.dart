@@ -89,6 +89,71 @@ class DocRaw extends DocBlock {
   const DocRaw(this.text);
 }
 
+/// 树形结构块（v3.2.8）。
+///
+/// 树是「数据结构」类文档的天然形态：源码摊平了要人肉数缩进，树能折叠、
+/// 能一眼看清层级与属性。当前由 XML 家族产出（见 docs/xml.dart），
+/// JSON / YAML 后续可复用同一块类型与渲染。
+class DocTree extends DocBlock {
+  /// 顶层节点（XML 的根元素、声明、注释可以并列，故是列表而非单根）。
+  final List<TreeNode> roots;
+  const DocTree(this.roots);
+}
+
+/// 树节点：名称 + 属性 + 文本 + 子节点。
+class TreeNode {
+  /// 元素名（含命名空间前缀，如 `w:p`）；`#comment` / `#declaration` 等为伪节点。
+  final String name;
+
+  /// 直接文本内容（已折空白）；无文本为 null。
+  final String? text;
+
+  /// 数据类型标签（v3.2.11）。
+  ///
+  /// XML 元素为 null；JSON 用 object / array / string / number / boolean / null
+  /// 标注值类型，渲染时以浅色徽标显示——树里一眼能分清「键」和「值」。
+  final String? kind;
+
+  /// 属性（按文档出现顺序）。
+  final List<TreeAttr> attrs;
+
+  /// 子元素。
+  final List<TreeNode> children;
+
+  const TreeNode(
+    this.name, {
+    this.text,
+    this.kind,
+    this.attrs = const [],
+    this.children = const [],
+  });
+
+  /// 叶子节点（渲染时不给折叠箭头）。
+  bool get isLeaf => children.isEmpty;
+
+  /// 属性个数（渲染摘要行用）。
+  int get attrCount => attrs.length;
+}
+
+/// 树节点的一个属性。
+class TreeAttr {
+  final String name;
+  final String value;
+  const TreeAttr(this.name, this.value);
+}
+
+/// SVG 图形块（v3.2.11）。
+///
+/// 图形模型见文件末尾「SVG 矢量图形」一节；解析在 docs/svg.dart，
+/// 渲染在 docs/render.dart 的 SvgView（CustomPainter，不引第三方 SVG 库）。
+class DocSvg extends DocBlock {
+  final SvgDoc doc;
+
+  /// 原始源码（供「查看源码」/复制）。
+  final String source;
+  const DocSvg(this.doc, this.source);
+}
+
 // ══════════════════════════════════════════════════════════════════
 // 行内
 // ══════════════════════════════════════════════════════════════════
@@ -239,7 +304,13 @@ class Spreadsheet {
 // ══════════════════════════════════════════════════════════════════
 
 /// 文档格式。
-enum DocFormat { markdown, text, docx, xlsx, unknown }
+///
+/// v3.2.11 新增 xml / html / svg / json 四种「数据结构类」：
+///   · xml  —— 树形阅读（xsd / xsl / plist / rss / csproj / resx … 同族）
+///   · json —— 树形阅读（对象/数组/标量按类型标注，JSONC 容错）
+///   · html —— 就地按文档阅读，不再跳浏览器
+///   · svg  —— 本机矢量渲染（纯 Dart 解析 + CustomPainter，不引第三方 SVG 库）
+enum DocFormat { markdown, text, docx, xlsx, xml, json, html, svg, unknown }
 
 /// 从文件名/路径推断格式。
 DocFormat detectFormat(String nameOrPath) {
@@ -256,18 +327,47 @@ DocFormat detectFormat(String nameOrPath) {
     case 'log':
     case 'text':
     case 'csv':
-    case 'json':
     case 'yaml':
     case 'yml':
     case 'ini':
     case 'conf':
       return DocFormat.text;
+    // v3.2.11：JSON 家族——树形阅读（原来按纯文本处理）
+    case 'json':
+    case 'jsonc':
+    case 'geojson':
+    case 'webmanifest':
+      return DocFormat.json;
     case 'docx':
     case 'docm':
       return DocFormat.docx;
     case 'xlsx':
     case 'xlsm':
       return DocFormat.xlsx;
+    // v3.2.8：XML 家族（数据结构）——走树形阅读
+    case 'xml':
+    case 'xsd':
+    case 'xsl':
+    case 'xslt':
+    case 'plist':
+    case 'rss':
+    case 'atom':
+    case 'kml':
+    case 'csproj':
+    case 'props':
+    case 'resx':
+    case 'pom':
+    case 'xaml':
+      return DocFormat.xml;
+    // v3.2.8：网页——就地按文档阅读，不跳浏览器
+    case 'html':
+    case 'htm':
+    case 'xhtml':
+    case 'shtml':
+      return DocFormat.html;
+    // v3.2.8：矢量图——本机渲染
+    case 'svg':
+      return DocFormat.svg;
     default:
       return DocFormat.unknown;
   }
@@ -292,6 +392,208 @@ bool isReadableFormat(String nameOrPath) => detectFormat(nameOrPath) != DocForma
 
 /// 支持打开的扩展名（Android intent-filter 与文件过滤共用，保持单一事实来源）。
 const List<String> kReadableExtensions = [
-  'md', 'markdown', 'txt', 'text', 'log', 'csv', 'json', 'yaml', 'yml',
+  'md', 'markdown', 'txt', 'text', 'log', 'csv', 'yaml', 'yml',
   'docx', 'xlsx',
+  // v3.2.11：数据结构（JSON / XML 家族）/ 网页 / 矢量图
+  'json', 'jsonc', 'geojson', 'webmanifest',
+  'xml', 'xsd', 'xsl', 'xslt', 'plist', 'rss', 'atom', 'kml',
+  'csproj', 'props', 'resx', 'pom', 'xaml',
+  'html', 'htm', 'xhtml', 'shtml',
+  'svg',
 ];
+
+// ══════════════════════════════════════════════════════════════════
+// SVG 矢量图形（v3.2.11）
+//
+// 纯数据模型：解析在 docs/svg.dart，渲染在 docs/render.dart 的 SvgView。
+// 放在统一模型里的原因与 Spreadsheet 一致——DocBlock 是 sealed 的，块类型必须和
+// 基类同库；渲染端才能靠「穷尽 switch」保证新格式不会被静默漏掉。
+// ══════════════════════════════════════════════════════════════════
+
+/// 解析后的 SVG：画布 + 视口 + 图元树。
+class SvgDoc {
+  /// 画布宽高（width/height 属性；缺省时退回 viewBox 尺寸）。
+  final double width;
+  final double height;
+
+  /// viewBox（minX minY w h）——渲染时按它缩放到画布。
+  final double viewBoxX;
+  final double viewBoxY;
+  final double viewBoxW;
+  final double viewBoxH;
+
+  final List<SvgNode> nodes;
+  const SvgDoc({
+    required this.width,
+    required this.height,
+    required this.nodes,
+    this.viewBoxX = 0,
+    this.viewBoxY = 0,
+    double? viewBoxW,
+    double? viewBoxH,
+  })  : viewBoxW = viewBoxW ?? width,
+        viewBoxH = viewBoxH ?? height;
+}
+
+/// 图元基类。
+sealed class SvgNode {
+  const SvgNode();
+}
+
+/// 分组（g 元素，以及被当作容器的 svg 元素）。
+class SvgGroup extends SvgNode {
+  final List<SvgNode> children;
+  final SvgTransform? transform;
+  const SvgGroup(this.children, {this.transform});
+}
+
+/// 一个可填充/描边的图元。
+class SvgShape extends SvgNode {
+  final SvgGeometry geometry;
+  final SvgStyle style;
+  final SvgTransform? transform;
+  const SvgShape(this.geometry, {this.style = const SvgStyle(), this.transform});
+}
+
+/// 文本。
+class SvgTextNode extends SvgNode {
+  final double x;
+  final double y;
+  final String text;
+  final double fontSize;
+
+  /// start | middle | end
+  final String anchor;
+  final SvgStyle style;
+  final SvgTransform? transform;
+  const SvgTextNode(
+    this.x,
+    this.y,
+    this.text, {
+    this.fontSize = 16,
+    this.anchor = 'start',
+    this.style = const SvgStyle(),
+    this.transform,
+  });
+}
+
+// ── 几何 ──────────────────────────────────────────────────────────
+
+sealed class SvgGeometry {
+  const SvgGeometry();
+}
+
+class SvgRect extends SvgGeometry {
+  final double x, y, w, h, rx, ry;
+  const SvgRect(this.x, this.y, this.w, this.h, {this.rx = 0, this.ry = 0});
+}
+
+class SvgCircle extends SvgGeometry {
+  final double cx, cy, r;
+  const SvgCircle(this.cx, this.cy, this.r);
+}
+
+class SvgEllipse extends SvgGeometry {
+  final double cx, cy, rx, ry;
+  const SvgEllipse(this.cx, this.cy, this.rx, this.ry);
+}
+
+class SvgLineGeom extends SvgGeometry {
+  final double x1, y1, x2, y2;
+  const SvgLineGeom(this.x1, this.y1, this.x2, this.y2);
+}
+
+/// 折线 / 多边形（close = true 时闭合）。
+class SvgPoly extends SvgGeometry {
+  final List<(double, double)> points;
+  final bool close;
+  const SvgPoly(this.points, {this.close = false});
+}
+
+/// 路径（命令已折算成绝对坐标）。
+class SvgPathGeom extends SvgGeometry {
+  final List<SvgPathCmd> cmds;
+  const SvgPathGeom(this.cmds);
+}
+
+// ── 路径命令（相对坐标已在解析期折算） ──────────────────────────────
+
+sealed class SvgPathCmd {
+  const SvgPathCmd();
+}
+
+class SvgCmdMove extends SvgPathCmd {
+  final double x, y;
+  const SvgCmdMove(this.x, this.y);
+}
+
+class SvgCmdLine extends SvgPathCmd {
+  final double x, y;
+  const SvgCmdLine(this.x, this.y);
+}
+
+class SvgCmdCubic extends SvgPathCmd {
+  final double x1, y1, x2, y2, x, y;
+  const SvgCmdCubic(this.x1, this.y1, this.x2, this.y2, this.x, this.y);
+}
+
+class SvgCmdQuad extends SvgPathCmd {
+  final double x1, y1, x, y;
+  const SvgCmdQuad(this.x1, this.y1, this.x, this.y);
+}
+
+class SvgCmdArc extends SvgPathCmd {
+  final double rx, ry, rot;
+  final bool largeArc, sweep;
+  final double x, y;
+  const SvgCmdArc(this.rx, this.ry, this.rot, this.largeArc, this.sweep, this.x, this.y);
+}
+
+class SvgCmdClose extends SvgPathCmd {
+  const SvgCmdClose();
+}
+
+// ── 样式 / 变换 ───────────────────────────────────────────────────
+
+/// 绘制样式。fill / stroke 为 null 表示「不画」（SVG 的 none）。
+/// 继承已在解析期算完，所以这里的取值就是最终值。
+class SvgStyle {
+  final int? fill;
+  final int? stroke;
+  final double strokeWidth;
+  final double opacity;
+
+  /// butt | round | square
+  final String lineCap;
+
+  /// miter | round | bevel
+  final String lineJoin;
+  const SvgStyle({
+    this.fill = 0xFF000000,
+    this.stroke,
+    this.strokeWidth = 1.0,
+    this.opacity = 1.0,
+    this.lineCap = 'butt',
+    this.lineJoin = 'miter',
+  });
+}
+
+/// 2D 仿射变换，存成 SVG matrix(a b c d e f) 同序的六个分量。
+class SvgTransform {
+  final double a, b, c, d, e, f;
+  const SvgTransform(this.a, this.b, this.c, this.d, this.e, this.f);
+  static const SvgTransform identity = SvgTransform(1, 0, 0, 1, 0, 0);
+
+  /// this × o（先应用 o 再应用 this，与 SVG transform 列表语义一致）。
+  SvgTransform multiply(SvgTransform o) => SvgTransform(
+        a * o.a + c * o.b,
+        b * o.a + d * o.b,
+        a * o.c + c * o.d,
+        b * o.c + d * o.d,
+        a * o.e + c * o.f + e,
+        b * o.e + d * o.f + f,
+      );
+
+  bool get isIdentity => a == 1 && b == 0 && c == 0 && d == 1 && e == 0 && f == 0;
+}
+

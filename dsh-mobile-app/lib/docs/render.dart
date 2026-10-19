@@ -8,6 +8,9 @@
 // v3.3.0（官方风格）：视觉与 lib/md.dart 同一套令牌——标题 mdH1..mdH4、正文 mdBase、
 // 表格 mdTable/mdTableHead、代码 mdCodeBlock + codeBanner 标题条、引用 2px line3 竖线；
 // 阅读页的「字号 +/−」只缩放令牌字号（不改令牌本身）。
+import 'dart:math' as math;
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -36,7 +39,20 @@ class DocRenderCtx {
   final Api? api;
   final String? baseDir;
   final String? baseUrl;
-  const DocRenderCtx({this.scale = 1.0, this.api, this.baseDir, this.baseUrl});
+
+  /// 树形结构（XML / JSON）的展开状态控制器。
+  ///
+  /// 放在渲染上下文里而不是树 widget 内部：阅读页「更多」菜单的
+  /// 「全部展开 / 全部折叠」和正文里的单节点点击要共享同一份状态，
+  /// 下拉重建（滚动 / 改字号）时也不该把用户展开的层级丢掉。
+  final DocTreeController? tree;
+  const DocRenderCtx({
+    this.scale = 1.0,
+    this.api,
+    this.baseDir,
+    this.baseUrl,
+    this.tree,
+  });
 
   /// 正文实际字号：官方 Markdown 正文令牌 × 阅读缩放。
   double get body => _mdBaseSize * scale;
@@ -238,6 +254,13 @@ Widget _block(BuildContext context, DocBlock b, DocRenderCtx ctx) {
         padding: const EdgeInsets.only(bottom: DshSpace.md),
         child: Text(text, style: ctx.bodyStyle(context)),
       );
+
+    // v3.2.11：数据结构类文档——XML / JSON 树、SVG 矢量图
+    case DocTree(:final roots):
+      return DocTreeView(roots: roots, ctx: ctx);
+
+    case DocSvg(:final doc, :final source):
+      return SvgView(doc: doc, source: source, ctx: ctx);
   }
 }
 
@@ -946,3 +969,580 @@ String _colName(int k) {
   }
   return b.toString().split('').reversed.join();
 }
+
+// ══════════════════════════════════════════════════════════════════
+// 树形结构（XML / JSON）
+// ══════════════════════════════════════════════════════════════════
+
+/// 树形视图的展开状态控制器（由阅读页持有，见 DocRenderCtx.tree）。
+class DocTreeController extends ChangeNotifier {
+  /// true = 全部展开，false = 全部折叠，null = 用视图默认（展开前两层）。
+  bool? expand;
+
+  void expandAll() {
+    expand = true;
+    notifyListeners();
+  }
+
+  void collapseAll() {
+    expand = false;
+    notifyListeners();
+  }
+}
+
+/// 可折叠树视图：XML / JSON 共用的「数据结构」呈现。
+///
+/// 默认展开前两层——顶层键 / 根元素一眼可见，深层内容点开再看，
+/// 既不糊一屏源码，也不让人为了看一个字段点十次。
+class DocTreeView extends StatefulWidget {
+  const DocTreeView({super.key, required this.roots, required this.ctx});
+
+  final List<TreeNode> roots;
+  final DocRenderCtx ctx;
+
+  @override
+  State<DocTreeView> createState() => _DocTreeViewState();
+}
+
+class _DocTreeViewState extends State<DocTreeView> {
+  /// 已展开节点的路径集合（路径 = 子节点下标链，如 /0/2/1）。
+  final Set<String> _expanded = {};
+  bool _seeded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.ctx.tree?.addListener(_applyController);
+  }
+
+  @override
+  void dispose() {
+    widget.ctx.tree?.removeListener(_applyController);
+    super.dispose();
+  }
+
+  void _applyController() {
+    final ctrl = widget.ctx.tree;
+    if (ctrl == null || ctrl.expand == null) return;
+    setState(() {
+      _expanded.clear();
+      if (ctrl.expand == true) _addAll(widget.roots, '');
+      _seeded = true;
+    });
+  }
+
+  void _addAll(List<TreeNode> nodes, String prefix) {
+    for (var i = 0; i < nodes.length; i++) {
+      final path = '$prefix/$i';
+      if (nodes[i].children.isNotEmpty) _expanded.add(path);
+      _addAll(nodes[i].children, path);
+    }
+  }
+
+  void _seed() {
+    if (_seeded) return;
+    _seeded = true;
+    void walk(List<TreeNode> nodes, String prefix, int depth) {
+      for (var i = 0; i < nodes.length; i++) {
+        final path = '$prefix/$i';
+        if (nodes[i].children.isNotEmpty && depth < 2) _expanded.add(path);
+        if (depth < 2) walk(nodes[i].children, path, depth + 1);
+      }
+    }
+
+    walk(widget.roots, '', 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _seed();
+    final c = DshPalette.of(context);
+    final rows = <Widget>[];
+    void walk(List<TreeNode> nodes, String prefix, int depth) {
+      for (var i = 0; i < nodes.length; i++) {
+        final node = nodes[i];
+        final path = '$prefix/$i';
+        final expanded = _expanded.contains(path);
+        rows.add(_TreeRow(
+          node: node,
+          depth: depth,
+          expanded: expanded,
+          onToggle: node.isLeaf
+              ? null
+              : () => setState(() {
+                    if (!_expanded.remove(path)) _expanded.add(path);
+                  }),
+        ));
+        if (expanded && node.children.isNotEmpty) walk(node.children, path, depth + 1);
+      }
+    }
+
+    walk(widget.roots, '', 0);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: DshSpace.md),
+      padding: const EdgeInsets.symmetric(vertical: DshSpace.xs),
+      decoration: BoxDecoration(
+        color: c.module,
+        borderRadius: DshRadius.rMd,
+        border: Border.fromBorderSide(DshStroke.side(c.line2)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows),
+    );
+  }
+}
+
+/// 一行树节点：缩进 + 折叠箭头 + 名称 + 类型徽标 + 属性 + 文本。
+class _TreeRow extends StatelessWidget {
+  const _TreeRow({
+    required this.node,
+    required this.depth,
+    required this.expanded,
+    this.onToggle,
+  });
+
+  final TreeNode node;
+  final int depth;
+  final bool expanded;
+  final VoidCallback? onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DshPalette.of(context);
+    return InkWell(
+      onTap: onToggle,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: DshSpace.xs + depth * 14.0,
+          right: DshSpace.sm,
+          top: 2,
+          bottom: 2,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 18,
+              height: 20,
+              child: onToggle == null
+                  ? null
+                  : Icon(
+                      expanded ? Icons.expand_more : Icons.chevron_right,
+                      size: 16,
+                      color: c.ink3,
+                    ),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: DshSpace.xs,
+                    runSpacing: 2,
+                    children: [
+                      Text(
+                        node.name,
+                        style: DshType.mdCode.copyWith(
+                          color: c.ink,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (node.kind != null) _kindBadge(context, node.kind!),
+                      for (final attr in node.attrs.take(6))
+                        Text(
+                          '${attr.name}="${attr.value}"',
+                          style: DshType.xxs12.copyWith(color: c.ink3),
+                        ),
+                      if (node.attrs.length > 6)
+                        Text(
+                          '+${node.attrs.length - 6}',
+                          style: DshType.xxs12.copyWith(color: c.ink3),
+                        ),
+                    ],
+                  ),
+                  if (node.text != null && node.text!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1),
+                      child: Text(
+                        node.text!,
+                        style: DshType.xs13.copyWith(color: c.ink2),
+                        maxLines: 6,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _kindBadge(BuildContext context, String kind) {
+    final c = DshPalette.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: c.brandSoft,
+        borderRadius: DshRadius.rXs,
+      ),
+      child: Text(
+        kind,
+        style: DshType.xxs12.copyWith(color: c.ink3, fontSize: 10),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SVG 矢量图（纯 Dart CustomPainter）
+// ══════════════════════════════════════════════════════════════════
+
+/// SVG 图形视图：白底卡片 + 等比缩放 + 可展开的源码。
+///
+/// 白底是刻意的：绝大多数 SVG 是按浅色页面画的（白底黑线），
+/// 直接铺在深色阅读页上会「看不见」；卡片也让图形与正文有明确边界。
+class SvgView extends StatelessWidget {
+  const SvgView({super.key, required this.doc, required this.source, required this.ctx});
+
+  final SvgDoc doc;
+  final String source;
+  final DocRenderCtx ctx;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = DshPalette.of(context);
+    final aspect = (doc.width > 0 && doc.height > 0) ? doc.width / doc.height : 2.0;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: DshSpace.md),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFFFF),
+        borderRadius: DshRadius.rLg,
+        border: Border.fromBorderSide(DshStroke.side(c.line2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(DshSpace.md),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final maxW = constraints.maxWidth;
+                var w = maxW;
+                var h = aspect > 0 ? w / aspect : w / 2;
+                final maxH = 460 * ctx.scale;
+                if (h > maxH) {
+                  h = maxH;
+                  w = h * aspect;
+                }
+                return Center(
+                  child: SizedBox(
+                    width: w,
+                    height: h,
+                    child: CustomPaint(painter: SvgPainter(doc)),
+                  ),
+                );
+              },
+            ),
+          ),
+          const DshDivider(),
+          ExpansionTile(
+            tilePadding: const EdgeInsets.symmetric(horizontal: DshSpace.md),
+            childrenPadding:
+                const EdgeInsets.fromLTRB(DshSpace.sm, 0, DshSpace.sm, DshSpace.sm),
+            shape: const Border(),
+            collapsedShape: const Border(),
+            iconColor: c.ink3,
+            collapsedIconColor: c.ink3,
+            title: Text(
+              L10n.t('查看 SVG 源码', 'View SVG source'),
+              style: DshType.mdSmall.copyWith(color: c.ink2),
+            ),
+            children: [
+              _DocCodeBlock(text: source, lang: 'svg', ctx: ctx),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// SVG 画布：把图形模型画到 Canvas 上（viewBox 缩放 + transform + 填充/描边/文本）。
+class SvgPainter extends CustomPainter {
+  const SvgPainter(this.doc);
+
+  final SvgDoc doc;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final vbW = doc.viewBoxW > 0 ? doc.viewBoxW : doc.width;
+    final vbH = doc.viewBoxH > 0 ? doc.viewBoxH : doc.height;
+    if (size.width <= 0 || size.height <= 0 || vbW <= 0 || vbH <= 0) return;
+    canvas.save();
+    canvas.scale(size.width / vbW, size.height / vbH);
+    canvas.translate(-doc.viewBoxX, -doc.viewBoxY);
+    for (final node in doc.nodes) {
+      _drawNode(canvas, node, 1.0);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant SvgPainter oldDelegate) => oldDelegate.doc != doc;
+
+  void _drawNode(Canvas canvas, SvgNode node, double parentOpacity) {
+    switch (node) {
+      case SvgGroup(:final children, :final transform):
+        canvas.save();
+        _applyTransform(canvas, transform);
+        for (final child in children) {
+          _drawNode(canvas, child, parentOpacity);
+        }
+        canvas.restore();
+      case SvgShape(:final geometry, :final style, :final transform):
+        canvas.save();
+        _applyTransform(canvas, transform);
+        final opacity = (parentOpacity * style.opacity).clamp(0.0, 1.0);
+        final path = _pathOf(geometry);
+        if (path != null) {
+          final fill = _paintFor(style, style.fill, opacity, PaintingStyle.fill, 1.0);
+          if (fill != null) canvas.drawPath(path, fill);
+          final stroke = _paintFor(style, style.stroke, opacity, PaintingStyle.stroke, style.strokeWidth);
+          if (stroke != null) canvas.drawPath(path, stroke);
+        }
+        canvas.restore();
+      case SvgTextNode():
+        canvas.save();
+        _applyTransform(canvas, node.transform);
+        _drawText(canvas, node, (parentOpacity * node.style.opacity).clamp(0.0, 1.0));
+        canvas.restore();
+    }
+  }
+
+  void _applyTransform(Canvas canvas, SvgTransform? t) {
+    if (t == null || t.isIdentity) return;
+    // SVG matrix(a b c d e f) 与 Flutter 列主序 4x4 的对应
+    final storage = Float64List.fromList(<double>[
+      t.a, t.b, 0, 0,
+      t.c, t.d, 0, 0,
+      0, 0, 1, 0,
+      t.e, t.f, 0, 1,
+    ]);
+    canvas.transform(storage);
+  }
+
+  Paint? _paintFor(
+    SvgStyle style,
+    int? argb,
+    double opacity,
+    PaintingStyle paintingStyle,
+    double strokeWidth,
+  ) {
+    if (argb == null) return null;
+    final alpha = (((argb >> 24) & 0xFF) * opacity).round().clamp(0, 255);
+    final paint = Paint()
+      ..isAntiAlias = true
+      ..style = paintingStyle
+      ..color = Color((alpha << 24) | (argb & 0x00FFFFFF));
+    if (paintingStyle == PaintingStyle.stroke) {
+      paint.strokeWidth = strokeWidth <= 0 ? 1.0 : strokeWidth;
+      paint.strokeCap = switch (style.lineCap) {
+        'round' => StrokeCap.round,
+        'square' => StrokeCap.square,
+        _ => StrokeCap.butt,
+      };
+      paint.strokeJoin = switch (style.lineJoin) {
+        'round' => StrokeJoin.round,
+        'bevel' => StrokeJoin.bevel,
+        _ => StrokeJoin.miter,
+      };
+    }
+    return paint;
+  }
+
+  void _drawText(Canvas canvas, SvgTextNode node, double opacity) {
+    final argb = node.style.fill;
+    if (argb == null) return;
+    final alpha = (((argb >> 24) & 0xFF) * opacity).round().clamp(0, 255);
+    final tp = TextPainter(
+      text: TextSpan(
+        text: node.text,
+        style: TextStyle(
+          color: Color((alpha << 24) | (argb & 0x00FFFFFF)),
+          fontSize: node.fontSize <= 0 ? 16 : node.fontSize,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    var dx = node.x;
+    if (node.anchor == 'middle') {
+      dx -= tp.width / 2;
+    } else if (node.anchor == 'end') {
+      dx -= tp.width;
+    }
+    // SVG 的 y 是基线：TextPainter 从行顶开始画，按 0.8em 近似基线偏移
+    tp.paint(canvas, Offset(dx, node.y - tp.height * 0.8));
+  }
+
+  Path? _pathOf(SvgGeometry g) {
+    switch (g) {
+      case SvgRect(:final x, :final y, :final w, :final h, :final rx, :final ry):
+        if (w <= 0 || h <= 0) return null;
+        final rect = Rect.fromLTWH(x, y, w, h);
+        if (rx > 0 || ry > 0) {
+          final rX = rx > 0 ? rx : ry;
+          final rY = ry > 0 ? ry : rx;
+          return Path()
+            ..addRRect(RRect.fromRectAndRadius(rect, Radius.elliptical(rX, rY)));
+        }
+        return Path()..addRect(rect);
+      case SvgCircle(:final cx, :final cy, :final r):
+        if (r <= 0) return null;
+        return Path()..addOval(Rect.fromCircle(center: Offset(cx, cy), radius: r));
+      case SvgEllipse(:final cx, :final cy, :final rx, :final ry):
+        if (rx <= 0 || ry <= 0) return null;
+        return Path()
+          ..addOval(Rect.fromCenter(
+            center: Offset(cx, cy),
+            width: rx * 2,
+            height: ry * 2,
+          ));
+      case SvgLineGeom(:final x1, :final y1, :final x2, :final y2):
+        return Path()
+          ..moveTo(x1, y1)
+          ..lineTo(x2, y2);
+      case SvgPoly(:final points, :final close):
+        if (points.isEmpty) return null;
+        final path = Path()..moveTo(points.first.$1, points.first.$2);
+        for (var i = 1; i < points.length; i++) {
+          path.lineTo(points[i].$1, points[i].$2);
+        }
+        if (close) path.close();
+        return path;
+      case SvgPathGeom(:final cmds):
+        return _pathOfCommands(cmds);
+    }
+  }
+
+  Path _pathOfCommands(List<SvgPathCmd> cmds) {
+    final path = Path();
+    var cx = 0.0, cy = 0.0, startX = 0.0, startY = 0.0;
+    for (final cmd in cmds) {
+      switch (cmd) {
+        case SvgCmdMove(:final x, :final y):
+          path.moveTo(x, y);
+          cx = x;
+          cy = y;
+          startX = x;
+          startY = y;
+        case SvgCmdLine(:final x, :final y):
+          path.lineTo(x, y);
+          cx = x;
+          cy = y;
+        case SvgCmdCubic(:final x1, :final y1, :final x2, :final y2, :final x, :final y):
+          path.cubicTo(x1, y1, x2, y2, x, y);
+          cx = x;
+          cy = y;
+        case SvgCmdQuad(:final x1, :final y1, :final x, :final y):
+          path.quadraticBezierTo(x1, y1, x, y);
+          cx = x;
+          cy = y;
+        case SvgCmdArc(:final rx, :final ry, :final rot, :final largeArc, :final sweep, :final x, :final y):
+          _arcTo(path, cx, cy, rx, ry, rot, largeArc, sweep, x, y);
+          cx = x;
+          cy = y;
+        case SvgCmdClose():
+          path.close();
+          cx = startX;
+          cy = startY;
+      }
+    }
+    return path;
+  }
+
+  /// SVG 椭圆弧（端点参数化 → 中心参数化，再按 ≤10° 折线近似）。
+  ///
+  /// 不用 Path.arcTo 是因为它只支持轴对齐椭圆；SVG 的 A 命令带 x-axis-rotation，
+  /// 折线近似在手机屏幕尺寸下视觉无损，且代码量小、可单测。
+  void _arcTo(
+    Path path,
+    double x1,
+    double y1,
+    double rx,
+    double ry,
+    double rotDeg,
+    bool largeArc,
+    bool sweep,
+    double x2,
+    double y2,
+  ) {
+    if (rx == 0 || ry == 0) {
+      path.lineTo(x2, y2);
+      return;
+    }
+    rx = rx.abs();
+    ry = ry.abs();
+    final phi = rotDeg * math.pi / 180.0;
+    final cosPhi = math.cos(phi);
+    final sinPhi = math.sin(phi);
+    final dx = (x1 - x2) / 2.0;
+    final dy = (y1 - y2) / 2.0;
+    final x1p = cosPhi * dx + sinPhi * dy;
+    final y1p = -sinPhi * dx + cosPhi * dy;
+    var rx2 = rx * rx;
+    var ry2 = ry * ry;
+    final x1p2 = x1p * x1p;
+    final y1p2 = y1p * y1p;
+    final lambda = x1p2 / rx2 + y1p2 / ry2;
+    if (lambda > 1) {
+      final s = math.sqrt(lambda);
+      rx *= s;
+      ry *= s;
+      rx2 = rx * rx;
+      ry2 = ry * ry;
+    }
+    final numerator = rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2;
+    final denominator = rx2 * y1p2 + ry2 * x1p2;
+    final sign = largeArc != sweep ? 1.0 : -1.0;
+    final coef = denominator == 0
+        ? 0.0
+        : sign * math.sqrt(math.max(0.0, numerator / denominator));
+    final cxp = coef * rx * y1p / ry;
+    final cyp = -coef * ry * x1p / rx;
+    final cx = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2.0;
+    final cy = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2.0;
+
+    double angleOf(double ux, double uy, double vx, double vy) {
+      final dot = ux * vx + uy * vy;
+      final len = math.sqrt((ux * ux + uy * uy) * (vx * vx + vy * vy));
+      var a = len == 0 ? 0.0 : math.acos((dot / len).clamp(-1.0, 1.0));
+      if (ux * vy - uy * vx < 0) a = -a;
+      return a;
+    }
+
+    final ux = (x1p - cxp) / rx;
+    final uy = (y1p - cyp) / ry;
+    final vx = (-x1p - cxp) / rx;
+    final vy = (-y1p - cyp) / ry;
+    final theta1 = angleOf(1, 0, ux, uy);
+    var dTheta = angleOf(ux, uy, vx, vy);
+    if (!sweep && dTheta > 0) dTheta -= 2 * math.pi;
+    if (sweep && dTheta < 0) dTheta += 2 * math.pi;
+    final steps = math.max(2, (dTheta.abs() / (math.pi / 18)).ceil());
+    for (var i = 1; i <= steps; i++) {
+      final t = theta1 + dTheta * i / steps;
+      final ct = math.cos(t);
+      final st = math.sin(t);
+      final px = cx + cosPhi * rx * ct - sinPhi * ry * st;
+      final py = cy + sinPhi * rx * ct + cosPhi * ry * st;
+      path.lineTo(px, py);
+    }
+  }
+}
+
+

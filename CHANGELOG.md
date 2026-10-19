@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.2.11（2026-10-20）— 文档阅读器升级：HTML / SVG / XML / JSON 就地读取
+
+> 版本：App `3.2.11+34` / 插件 `3.1.5-eun.1`。
+> 验收门槛：`flutter analyze`（0 issue）。`flutter test`（322 全部通过）。
+
+- **HTML**：容错解析（未闭合标签、大小写混写、void 元素、裸 `&` 都能吃下），映射到标题 / 段落 / 列表 / 表格 / 引用 / 代码 / 链接 / 图片 / 行内样式，复用同一套阅读渲染与目录跳转；`script` / `style` / `head` / `meta` 一律不产出内容——宁可少显示，也不把 JS/CSS 糊进正文。顺带修复「body 下直接出现的行内标签」丢语义的问题（顶层 `<a>` / `<img>` 现在也能正确出链接与图片）。
+- **SVG**：纯 Dart 解析常用子集（rect / circle / ellipse / line / polyline / polygon / path 全命令、嵌套 `g` 与 transform、fill/stroke/opacity/linecap/linejoin、text、颜色），由 CustomPainter 就地矢量渲染（不引 flutter_svg、不开 WebView）；白底卡片保证深色主题下看得见，卡片底部可展开「查看 SVG 源码」。
+- **XML**：解析成可折叠树——声明 / 注释 / DOCTYPE / 处理指令按伪节点保留，属性、文本、CDATA 不丢；覆盖 xsd / xsl / plist / rss / atom / kml / csproj / props / resx / pom / xaml 等同族扩展名；节点上限 4000，超限截断并给出页内告警。
+- **JSON**：解析成可折叠树并按类型标注（object / array / string / number / boolean / null），一眼分清键和值；支持 JSONC（`//`、`/* */` 注释与尾逗号）及 geojson / webmanifest；字符串里的 `//`、`,` 不会被剥离逻辑误伤；解析失败按源码兜底，不抛异常。
+- **通用体验**：树形视图默认展开两层，阅读页「更多」提供「全部展开 / 全部折叠」；「目录」只在有标题结构时出现；「导出 Word」对数据结构 / 矢量图隐藏（仍可复制全文 / 另存原文件）；文件没有扩展名时按内容嗅探（拷来的配置片段、抓下来的页面也能直接打开）；外部「用 DSH Remote 打开」/ 分享入口的 MIME 与扩展名清单同步扩到新格式。
+- 回归：新增 `test/docs_xml_test.dart`、`docs_html_test.dart`、`docs_json_test.dart`、`docs_svg_test.dart`、`docs_loader_formats_test.dart`、`docs_reader_widget_test.dart`（23 例）；`docs_link_test` 更新「html 直链现在就地打开」的新语义；`ui_pages_gallery_test` 的图标字体路径改为按 FLUTTER_ROOT / 解释器位置推导（不再写死 C: 盘）。
 ## v3.2.10（2026-10-19）— 修复问询/审批对话框超出屏幕
 
 > 版本：App `3.2.10+33` / 插件 `3.1.5-eun.1`。

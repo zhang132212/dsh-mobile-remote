@@ -73,6 +73,10 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
   final _outline = <(int, String)>[];
   final _outlineBlockIndex = <int>[];
 
+  /// 树形结构（XML / JSON）的展开状态——放在页面 state 里，
+  /// 「更多」菜单和正文树共享同一份；滚动 / 改字号重建不丢。
+  final _treeCtrl = DocTreeController();
+
   @override
   void initState() {
     super.initState();
@@ -82,6 +86,7 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
   @override
   void dispose() {
     _scroll.dispose();
+    _treeCtrl.dispose();
     super.dispose();
   }
 
@@ -276,8 +281,28 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         DocTable(:final rows) =>
           rows.map((r) => r.map((c) => _plainOfInline(c.spans)).join(' | ')).join('\n'),
         DocRaw(:final text) => text,
+        DocTree(:final roots) => _plainOfTree(roots),
+        DocSvg(:final source) => source,
         DocRule() => '',
       };
+
+  /// 树形结构拍平成缩进文本（复制全文用；缩进保留层级，粘到聊天里也可读）。
+  static String _plainOfTree(List<TreeNode> roots) {
+    final b = StringBuffer();
+    void walk(List<TreeNode> nodes, int depth) {
+      for (final n in nodes) {
+        final attrs = n.attrs.isEmpty
+            ? ''
+            : ' ${n.attrs.map((a) => '${a.name}="${a.value}"').join(' ')}';
+        final text = n.text == null || n.text!.isEmpty ? '' : ': ${n.text}';
+        b.writeln('${'  ' * depth}${n.name}$attrs$text');
+        walk(n.children, depth + 1);
+      }
+    }
+
+    walk(roots, 0);
+    return b.toString().trimRight();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -331,9 +356,21 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
     );
   }
 
+  /// 只有真有标题结构才显示「目录」：xlsx / 树形结构与目录无关。
+  bool _hasOutlineEntry(Document? doc) =>
+      doc != null && doc.format != DocFormat.xlsx && !documentHasTree(doc);
+
+  /// 「导出 Word」对数据结构 / 矢量图没有意义（原样阅读才是需求），
+  /// 对正文类格式保留（md / txt / docx / html）。
+  bool _canExportWord(Document? doc) =>
+      doc == null ||
+      (doc.format != DocFormat.svg &&
+          doc.format != DocFormat.xml &&
+          doc.format != DocFormat.json);
+
   /// 全屏页与抽屉共用的操作按钮。
   List<Widget> _actions(Document? doc) => [
-        if (doc != null && doc.format != DocFormat.xlsx)
+        if (_hasOutlineEntry(doc))
           Center(
             child: DshIconButton(
               icon: Icons.list_alt_outlined,
@@ -359,6 +396,10 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
                   _saveOriginal();
                 case 'copy':
                   _copyAll();
+                case 'tree-expand':
+                  _treeCtrl.expandAll();
+                case 'tree-collapse':
+                  _treeCtrl.collapseAll();
               }
             },
             itemBuilder: (c) => [
@@ -372,10 +413,22 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
               ),
               PopupMenuItem(value: 'font0', child: Text(L10n.t('恢复默认字号', 'Reset text size'))),
               const PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'word',
-                child: Text(L10n.t('导出 Word（公式原生）', 'Export Word (native equations)')),
-              ),
+              if (doc != null && documentHasTree(doc)) ...[
+                PopupMenuItem(
+                  value: 'tree-expand',
+                  child: Text(L10n.t('全部展开', 'Expand all')),
+                ),
+                PopupMenuItem(
+                  value: 'tree-collapse',
+                  child: Text(L10n.t('全部折叠', 'Collapse all')),
+                ),
+                const PopupMenuDivider(),
+              ],
+              if (_canExportWord(doc))
+                PopupMenuItem(
+                  value: 'word',
+                  child: Text(L10n.t('导出 Word（公式原生）', 'Export Word (native equations)')),
+                ),
               PopupMenuItem(value: 'save', child: Text(L10n.t('另存原文件', 'Save original file'))),
               if (doc != null && doc.format != DocFormat.xlsx)
                 PopupMenuItem(value: 'copy', child: Text(L10n.t('复制全文', 'Copy full text'))),
@@ -413,6 +466,7 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
       api: widget.api,
       baseDir: widget.remotePath == null ? null : p.windows.dirname(widget.remotePath!),
       baseUrl: widget.httpUrl,
+      tree: _treeCtrl,
     );
 
     // 电子表格：多表用胶囊选择器切换
