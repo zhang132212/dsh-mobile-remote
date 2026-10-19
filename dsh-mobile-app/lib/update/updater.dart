@@ -42,6 +42,10 @@ class UpdateInfo {
   final int sizeBytes;
   final String sha256;
   final String apkUrl;
+
+  /// GitHub API 资产地址（`assets[].url`）。直链被网络阻断时的兜底下载入口；
+  /// 需要 `Accept: application/octet-stream` 才会 302 到真实文件。
+  final String? apkApiUrl;
   final String releaseUrl;
   final String notes;
   final int sequence;
@@ -54,6 +58,7 @@ class UpdateInfo {
     required this.sizeBytes,
     required this.sha256,
     required this.apkUrl,
+    this.apkApiUrl,
     required this.releaseUrl,
     required this.notes,
     required this.sequence,
@@ -108,8 +113,11 @@ class Updater {
     if (remoteCode <= installedVersionCode) return null; // 已是最新
 
     // ④ 找 APK 资产（按 manifest 的 fileName 匹配）
+    // 直链（browser_download_url）优先；被网络阻断时用 API 资产地址兜底
+    // （见 `_apiAssetUrl`：GitHub API 域名可达、302 到 release-assets CDN）。
     final apkUrl = _assetUrl(release, app.fileName);
-    if (apkUrl == null) {
+    final apkApiUrl = _apiAssetUrl(release, app.fileName);
+    if (apkUrl == null && apkApiUrl == null) {
       throw StateError('Release 里找不到资产 ${app.fileName}');
     }
 
@@ -119,7 +127,8 @@ class Updater {
       fileName: app.fileName,
       sizeBytes: app.sizeBytes,
       sha256: app.sha256.toLowerCase(),
-      apkUrl: apkUrl,
+      apkUrl: apkUrl ?? apkApiUrl!,
+      apkApiUrl: apkUrl == null ? null : apkApiUrl,
       releaseUrl: (release['html_url'] as String?) ?? '',
       notes: (release['body'] as String?) ?? '',
       sequence: manifest.sequence,
@@ -154,43 +163,72 @@ class Updater {
 
     final client = http.Client();
     try {
-      final req = http.Request('GET', Uri.parse(info.apkUrl))
-        ..headers['User-Agent'] = 'DSH-Remote-Updater';
-      final res = await client.send(req).timeout(const Duration(seconds: 60));
-      if (res.statusCode != 200) {
-        throw StateError('下载失败 HTTP ${res.statusCode}');
+      // 直链优先；直链被网络阻断（例如 github.com 不可达）时改用 GitHub API 资产地址。
+      final candidates = <String>[info.apkUrl];
+      if (info.apkApiUrl != null && info.apkApiUrl != info.apkUrl) {
+        candidates.add(info.apkApiUrl!);
       }
-      final total = res.contentLength ?? (info.sizeBytes > 0 ? info.sizeBytes : null);
-      final sink = partFile.openWrite();
-      final digestSink = _Sha256Capture();
-      var received = 0;
-      try {
-        await for (final chunk in res.stream) {
-          sink.add(chunk);
-          digestSink.add(chunk);
-          received += chunk.length;
-          onProgress?.call(total == null || total <= 0 ? null : received / total);
+      Object? lastError;
+      for (final url in candidates) {
+        try {
+          return await _downloadFrom(client, url, info, finalPath, partFile, onProgress);
+        } catch (e) {
+          lastError = e;
+          AppLog.instance.log('[update] APK 下载源失败（$url）：$e');
+          if (partFile.existsSync()) partFile.deleteSync();
         }
-      } finally {
-        await sink.flush();
-        await sink.close();
       }
-      digestSink.finish();
-      final got = digestSink.digest.toLowerCase();
-      if (got != info.sha256) {
-        // 校验失败：删掉半成品，绝不安装
-        if (partFile.existsSync()) partFile.deleteSync();
-        throw StateError('APK 校验失败（sha256 不符）\n期望 ${info.sha256}\n实际 $got');
-      }
-      // 原子改名
-      final target = File(finalPath);
-      if (target.existsSync()) target.deleteSync();
-      partFile.renameSync(finalPath);
-      AppLog.instance.log('[update] APK 下载完成并校验通过：$finalPath');
-      return target;
+      throw StateError('下载失败：$lastError');
     } finally {
       client.close();
     }
+  }
+
+  /// 从单个 URL 流式下载到 .part，边下边算 sha256，校验通过后原子改名。
+  Future<File> _downloadFrom(
+    http.Client client,
+    String url,
+    UpdateInfo info,
+    String finalPath,
+    File partFile,
+    void Function(double? progress)? onProgress,
+  ) async {
+    final req = http.Request('GET', Uri.parse(url))
+      ..headers['User-Agent'] = 'DSH-Remote-Updater'
+      // API 资产地址需要它才会 302 到真实文件；直链带上也无害。
+      ..headers['Accept'] = 'application/octet-stream';
+    final res = await client.send(req).timeout(const Duration(seconds: 60));
+    if (res.statusCode != 200) {
+      throw StateError('下载失败 HTTP ${res.statusCode}');
+    }
+    final total = res.contentLength ?? (info.sizeBytes > 0 ? info.sizeBytes : null);
+    final sink = partFile.openWrite();
+    final digestSink = _Sha256Capture();
+    var received = 0;
+    try {
+      await for (final chunk in res.stream) {
+        sink.add(chunk);
+        digestSink.add(chunk);
+        received += chunk.length;
+        onProgress?.call(total == null || total <= 0 ? null : received / total);
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+    digestSink.finish();
+    final got = digestSink.digest.toLowerCase();
+    if (got != info.sha256) {
+      // 校验失败：删掉半成品，绝不安装
+      if (partFile.existsSync()) partFile.deleteSync();
+      throw StateError('APK 校验失败（sha256 不符）\n期望 ${info.sha256}\n实际 $got');
+    }
+    // 原子改名
+    final target = File(finalPath);
+    if (target.existsSync()) target.deleteSync();
+    partFile.renameSync(finalPath);
+    AppLog.instance.log('[update] APK 下载完成并校验通过：$finalPath');
+    return target;
   }
 
   /// 触发系统安装器（用户确认后系统安装；同签名可**覆盖安装，无需卸载**）。
@@ -212,16 +250,33 @@ class Updater {
   }
 
   Future<String> _fetchManifestText(Map<String, dynamic> release) async {
-    final url = _assetUrl(release, kManifestAssetName);
-    if (url == null) {
+    final browserUrl = _assetUrl(release, kManifestAssetName);
+    final apiUrl = _apiAssetUrl(release, kManifestAssetName);
+    final candidates = <String>[?browserUrl];
+    if (apiUrl != null && apiUrl != browserUrl) candidates.add(apiUrl);
+    if (candidates.isEmpty) {
       throw StateError('该 Release 未附带签名清单 $kManifestAssetName');
     }
-    final res = await http.get(Uri.parse(url), headers: const {
-      'Accept': 'application/octet-stream',
-      'User-Agent': 'DSH-Remote-Updater',
-    }).timeout(const Duration(seconds: 30));
-    if (res.statusCode != 200) throw StateError('下载清单失败 HTTP ${res.statusCode}');
-    return utf8.decode(res.bodyBytes);
+    Object? lastError;
+    for (var i = 0; i < candidates.length; i++) {
+      final url = candidates[i];
+      try {
+        final res = await http.get(Uri.parse(url), headers: const {
+          // API 资产地址需要它才会 302 到真实文件；直链带上也无害。
+          'Accept': 'application/octet-stream',
+          'User-Agent': 'DSH-Remote-Updater',
+        }).timeout(const Duration(seconds: 15));
+        if (res.statusCode != 200) throw StateError('HTTP ${res.statusCode}');
+        if (i > 0) {
+          AppLog.instance.log('[update] 清单直链失败，已改用 GitHub API 资产地址并成功');
+        }
+        return utf8.decode(res.bodyBytes);
+      } catch (e) {
+        lastError = e;
+        AppLog.instance.log('[update] 清单下载失败（$url）：$e');
+      }
+    }
+    throw StateError('下载清单失败：$lastError');
   }
 
   static String? _assetUrl(Map<String, dynamic> release, String name) {
@@ -230,6 +285,21 @@ class Updater {
     for (final a in assets) {
       if (a is Map && a['name'] == name) {
         final u = a['browser_download_url'];
+        if (u is String && u.isNotEmpty) return u;
+      }
+    }
+    return null;
+  }
+
+  /// GitHub API 资产地址（`assets[].url`）：公开仓库未认证即可用，配合
+  /// `Accept: application/octet-stream` 会 302 到 release-assets 的签名 URL。
+  /// 用于 github.com 直链被网络阻断时的兜底（api.github.com 与 CDN 通常可达）。
+  static String? _apiAssetUrl(Map<String, dynamic> release, String name) {
+    final assets = release['assets'];
+    if (assets is! List) return null;
+    for (final a in assets) {
+      if (a is Map && a['name'] == name) {
+        final u = a['url'];
         if (u is String && u.isNotEmpty) return u;
       }
     }
