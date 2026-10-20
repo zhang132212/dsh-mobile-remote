@@ -1690,17 +1690,20 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       case 'assistant/message':
         var body = d?['text'] as String? ?? '';
-        // 噪声 assistant 记录保留在模型中，但系统提示词与上下文快照在所有模式均隐藏。
-        // 工具阶段中间产物（正文为空的多步消息）：不渲染空气泡，过程由活动条呈现
-        if (body.trim().isEmpty) {
+        final reasoningChars = (d?['reasoningChars'] as num?)?.toInt() ?? 0;
+        final reasoningText = (d?['reasoning'] as String?) ?? '';
+        // v3.2.14（真机反馈）：0.2.x 的多步工具调用里，中间步骤的 assistant 消息常常
+        // 「只有 reasoning + tool-call、正文为空」。此前这里直接 return，把思维链一起丢掉
+        // → 手机端整轮只在最后一条有正文的消息上看到一波思维链（或完全看不到）。
+        // 现在：正文空但思维链非空 → 仍产出「只有思维链」的时间线块；两者都空才跳过
+        // （空气泡依旧不渲染，过程仍由活动条呈现）。
+        if (body.trim().isEmpty && reasoningText.isEmpty) {
           if (!history || tail) {
             _draft = '';
             _streaming = false;
           }
           return;
         }
-        final reasoningChars = (d?['reasoningChars'] as num?)?.toInt() ?? 0;
-        final reasoningText = (d?['reasoning'] as String?) ?? '';
         // 有思维链正文时：正文里不再重复「（思考 N 字）」占位（思维链作为可折叠块单独呈现）；
         // 无正文（旧数据）时回退旧占位。
         final prefix = reasoningText.isNotEmpty
@@ -1717,7 +1720,9 @@ class _ChatScreenState extends State<ChatScreen> {
             detailTextChars: ev.detailTextChars);
         // v3.1.4（issue #13）：记录最近一条**会渲染出来**的回复，供轮次兜底判定
         // （注入的上下文快照虽然进模型但界面隐藏，不能算作本轮已有回复）。
-        if ((!history || tail) && ev.seq != null && !timelineIsInjectedNoise(body)) _lastAssistantSeq = ev.seq;
+        if (body.trim().isNotEmpty && (!history || tail) && ev.seq != null && !timelineIsInjectedNoise(body)) {
+          _lastAssistantSeq = ev.seq;
+        }
         if (history) {
           out.add(item);
         } else {
@@ -1785,7 +1790,8 @@ class _ChatScreenState extends State<ChatScreen> {
           _draft = '';
           _streaming = false;
         }
-        final reason = (d?['reason'] as Map<String, dynamic>?)?['kind'];
+        final reasonData = d?['reason'] as Map<String, dynamic>?;
+        final reason = reasonData?['kind'];
         final item = _MsgItem.divider(
             L10n.t('轮次 ${d?['turn']} 结束${reason != null ? '（$reason）' : ''}',
                 'Turn ${d?['turn']} ended${reason != null ? ' ($reason)' : ''}'),
@@ -1794,6 +1800,21 @@ class _ChatScreenState extends State<ChatScreen> {
           out.add(item);
         } else {
           out.insert(0, item);
+        }
+        // v3.2.14：失败轮次不能只在时间线上留一句「轮次 N 结束（error）」——把内核给的
+        // 失败原因落成醒目卡片（真机踩坑：模型账户余额不足时用户只看到「对话不了」，
+        // 原因只躺在通知中心里，根本不会去翻）。
+        if (reason == 'error') {
+          final err = reasonData?['error'];
+          final message = err is Map ? (err['message'] as String?) : (err is String ? err : null);
+          if (message != null && message.trim().isNotEmpty) {
+            final errItem = _MsgItem.event(eventType: 'turn/error', text: message, seq: ev.seq);
+            if (history) {
+              out.add(errItem);
+            } else {
+              out.insert(0, errItem);
+            }
+          }
         }
       default:
         // 未知 Visible event 不再静默丢弃；普通模式显示类型摘要，调试模式可展开原始详情。
@@ -3333,10 +3354,12 @@ class _ChatScreenState extends State<ChatScreen> {
                   style: DshType.mdCodeBlock.copyWith(color: c.ink2),
                 ),
               ),
-             _MessageActionsBar(
-              item: item,
-              onAction: (a) => _runMessageAction(item, a),
-            ),
+            // v3.2.14：只有思维链、没有正文的步骤块不挂复制/评价操作栏（没内容可操作）
+            if (item.text.trim().isNotEmpty)
+              _MessageActionsBar(
+                item: item,
+                onAction: (a) => _runMessageAction(item, a),
+              ),
           ],
         );
       case _MsgKind.tool:
@@ -3364,6 +3387,17 @@ class _ChatScreenState extends State<ChatScreen> {
               seq: item.seq!,
               api: _api,
               turn: (item.rawData?['turn'] as num?)?.toInt(),
+            ),
+          );
+        }
+        // v3.2.14：轮次失败原因（模型账户/网络等错误）——让用户一眼看到「为什么没回复」。
+        if (item.eventType == 'turn/error') {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: DshSpace.sm),
+            child: DshBanner(
+              message: L10n.t('本轮执行失败：${item.text}', 'Turn failed: ${item.text}'),
+              icon: Icons.error_outline,
+              tone: DshBannerTone.danger,
             ),
           );
         }
@@ -4358,21 +4392,24 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
   Widget build(BuildContext context) {
     // v2.9.0 review(M4)：缓存键含亮度——切深/浅色后已渲染气泡颜色需重建
     // （原仅按文本缓存 key,渲染颜色已烘焙进 Widget,切换主题不刷新）
+    // v3.2.14：正文为空、只有思维链的步骤（多步工具调用的中间产物）——正文区留空、
+    // 不解析「…」占位，只渲染思维链折叠块。
+    final hasText = widget.text.trim().isNotEmpty;
     final cacheKey = '${widget.text}\u0000${Theme.of(context).brightness}';
-    if (cacheKey != _parsedFor) {
+    if (hasText && cacheKey != _parsedFor) {
       // v3.2.3 修复（来自发行线 677bad5）：**必须在解析成功之后**才记缓存键。
       // 原实现先写 _parsedFor 再解析，解析一旦抛异常，_parsedFor 已经等于 cacheKey，
       // 而 _blocks 仍是 null —— 之后每次 build 都死在下面的 ..._blocks!，
       // 于是这条消息**永久**画不出来（真机复现：算积分那条回答整条消失）。
       try {
-        _blocks = renderMarkdownBlocks(widget.text.isEmpty ? '…' : widget.text, context);
+        _blocks = renderMarkdownBlocks(widget.text, context);
         _parsedFor = cacheKey;
       } catch (error, stack) {
         // 富渲染失败也绝不丢内容：降级成纯文本，至少能看到原文。
         AppLog.instance.log('Chat: 气泡富渲染失败，降级纯文本：$error\n$stack');
         _blocks = [
           SelectableText(
-            widget.text.isEmpty ? '…' : widget.text,
+            widget.text,
             style: DshType.mdBase.copyWith(color: DshColors.ink(context)),
           ),
         ];
@@ -4413,7 +4450,7 @@ class _AssistantBubbleState extends State<_AssistantBubble> {
             if (hasReasoning) _buildReasoningChain(context),
             // v3.2.3（来自发行线 677bad5）：不再用 _blocks!（空断言会让整条消息消失），
             // 空则什么都不渲染。
-            ...(_blocks ?? const <Widget>[]),
+            if (hasText) ...(_blocks ?? const <Widget>[]),
             // v3.0.0 图像链路：附图（agent 回复里的图片，点击全屏）
             if (widget.images.isNotEmpty) ...[
               const SizedBox(height: DshSpace.sm),
