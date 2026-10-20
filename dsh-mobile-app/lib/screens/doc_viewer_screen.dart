@@ -23,6 +23,9 @@ import '../docs/html_interactive.dart';
 import '../docs/loader.dart';
 import '../docs/model.dart';
 import '../docs/render.dart';
+import '../review/diff_view.dart';
+import '../review/model.dart' as review;
+import '../review/ref.dart';
 import '../dsh_kit.dart';
 import '../l10n.dart';
 import '../theme.dart';
@@ -50,6 +53,10 @@ class DocViewerScreen extends StatefulWidget {
   /// 嵌入式：不套 Scaffold/AppBar，改用紧凑头部——供底部抽屉复用，
   /// 这样在聊天里点链接就地阅读时，**对话不会被关掉**。
   final bool embedded;
+
+  /// v3.2.14（改动审阅）：这份文件在本轮改动里的坐标。非空时页面顶部出现
+  /// 「文档 / 改动」切换——读全文与看这一轮到底改了什么，在同一个阅读器里完成。
+  final DocReviewRef? review;
   const DocViewerScreen({
     super.key,
     required this.name,
@@ -58,6 +65,7 @@ class DocViewerScreen extends StatefulWidget {
     this.httpUrl,
     this.api,
     this.embedded = false,
+    this.review,
   });
 
   @override
@@ -83,6 +91,14 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
   /// 树形结构（XML / JSON）的展开状态——放在页面 state 里，
   /// 「更多」菜单和正文树共享同一份；滚动 / 改字号重建不丢。
   final _treeCtrl = DocTreeController();
+
+  /// v3.2.14（改动审阅）：「文档 / 改动」页签（0=文档，1=改动）。
+  int _reviewMode = 0;
+
+  /// 本轮对比（每个文件一份，切页签只读一次）。
+  review.FileDiff? _reviewDiff;
+  bool _reviewLoading = false;
+  String? _reviewError;
 
   @override
   void initState() {
@@ -392,6 +408,7 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         child: Column(
           children: [
             _embeddedHeader(context, doc),
+            _reviewBar(context),
             Expanded(child: _body()),
           ],
         ),
@@ -402,9 +419,14 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
       backgroundColor: c.docPreview,
       appBar: DshAppBar(
         title: widget.name.split(RegExp(r'[\\/]')).last,
-        actions: _actions(doc),
+        actions: _reviewMode == 0 ? _actions(doc) : const [],
       ),
-      body: _body(),
+      body: Column(
+        children: [
+          _reviewBar(context),
+          Expanded(child: _body()),
+        ],
+      ),
     );
   }
 
@@ -520,6 +542,120 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         ),
       ];
 
+  /// v3.2.14：（从改动审阅页打开时）顶部的「文档 / 改动」切换条。
+  ///
+  /// 这是「重构文档阅读器」的关键一步：阅读器不再只是把文件摊开给你读，它还能把
+  /// **这一轮到底改了哪几行**按增删标记摆出来——review 与阅读在同一个页面里完成。
+  Widget _reviewBar(BuildContext context) {
+    if (widget.review == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(DshSpace.pageH, DshSpace.sm, DshSpace.pageH, 0),
+      child: DshSegmented(
+        items: [L10n.t('文档', 'Document'), L10n.t('改动', 'Changes')],
+        index: _reviewMode,
+        onChanged: (i) {
+          if (i == _reviewMode) return;
+          setState(() => _reviewMode = i);
+          if (i == 1) _loadReviewDiff();
+        },
+      ),
+    );
+  }
+
+  /// 读本轮对比（每个文件只读一次；失败可重试）。
+  Future<void> _loadReviewDiff({bool force = false}) async {
+    final ref = widget.review;
+    if (ref == null) return;
+    if (!force && (_reviewDiff != null || _reviewLoading)) return;
+    final api = widget.api;
+    if (api == null) {
+      setState(() => _reviewError = L10n.t('缺少连接信息', 'Missing connection'));
+      return;
+    }
+    setState(() {
+      _reviewLoading = true;
+      _reviewError = null;
+    });
+    try {
+      final diff = await api.changesDiff(ref.sessionId, ref.seq, ref.index);
+      if (!mounted) return;
+      setState(() {
+        _reviewDiff = diff;
+        _reviewLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _reviewError = '$e';
+        _reviewLoading = false;
+      });
+    }
+  }
+
+  /// 「改动」页签正文：文件路径 + 状态说明 + 逐行对比。
+  Widget _reviewBody() {
+    final c = DshPalette.of(context);
+    if (_reviewLoading) return const DshLoading();
+    final error = _reviewError;
+    if (error != null) {
+      return DshError(
+        message: L10n.t('读取对比失败：$error', 'Failed to load comparison: $error'),
+        onRetry: () => _loadReviewDiff(force: true),
+      );
+    }
+    final diff = _reviewDiff;
+    if (diff == null) return const SizedBox.shrink();
+
+    // 二进制/过大/相同由正文占位行说明；头部只补「新建 / 删除 / 对比超时」。
+    final note = diff.kind == review.FileDiffKind.text && !diff.identical ? diff.statusNote : null;
+    Widget body;
+    if (diff.kind == review.FileDiffKind.binary) {
+      body = DiffPlaceholder(
+        icon: Icons.data_array,
+        text: L10n.t('二进制文件，没有逐行对比', 'Binary file — no line comparison'),
+      );
+    } else if (diff.kind == review.FileDiffKind.oversized) {
+      body = DiffPlaceholder(
+        icon: Icons.unfold_more,
+        text: L10n.t('文件超过 2 MB，未生成对比', 'File exceeds 2 MB — no comparison'),
+      );
+    } else if (diff.identical) {
+      body = DiffPlaceholder(
+        icon: Icons.check_circle_outline,
+        text: note ?? L10n.t('本轮内容没有变化', 'No content change this turn'),
+      );
+    } else {
+      body = SelectionArea(child: DiffHunksView(hunks: diff.hunks));
+    }
+
+    return Scrollbar(
+      controller: _scroll,
+      child: SingleChildScrollView(
+        controller: _scroll,
+        padding: const EdgeInsets.fromLTRB(
+          DshSpace.pageH,
+          DshSpace.sm,
+          DshSpace.pageH,
+          DshSpace.xxxl,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (note != null && !diff.identical) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: DshSpace.sm),
+                child: Text(
+                  note,
+                  style: DshType.xxs12.copyWith(color: c.ink3),
+                ),
+              ),
+            ],
+            body,
+          ],
+        ),
+      ),
+    );
+  }
   /// HTML 文档的「交互模式」入口条：点一下用原生 WebView 跑真浏览器引擎。
   Widget _interactiveBanner(BuildContext context) {
     final c = DshPalette.of(context);
@@ -572,6 +708,9 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         },
       );
     }
+
+    // v3.2.14：「改动」页签不依赖文档解析（二进制/超大文件也能看对比）。
+    if (_reviewMode == 1) return _reviewBody();
 
     final doc = _doc;
     if (doc == null) return const SizedBox.shrink();

@@ -675,6 +675,67 @@
 ```
 - 目标目录：`sessionId` 对应 agent 的工作目录 → 缺省回退第一个注册工作区根；无法确定 → `503 no-workspace`
 - `name` 不合法（含 `\ / : * ? " < > |`、`.`/`..`/超 255）→ `400 invalid-name`；body 上限 64MB → `413 payload-too-large`
+### 6.18 本轮改动审阅（v3.2.14）
+
+数据源是 Host 的 `@deepseek-ai/dsh-workspace-changes`：每个顶层轮次结束时，它用 git 工作树快照
+（加上文件工具编辑前后的整文件捕获）算出「改了哪些文件、各增删几行」，并在**会话存活期间**按宣告
+事件的 seq 保存摘要与两侧内容。插件只做鉴权后的转发，手机不重算 diff、不缓存基线。
+
+能力位（`GET /m/api/bootstrap` 的响应）：
+```json
+{ "capabilities": { "eventTimeline": { … }, "changes": true } }
+```
+`capabilities.changes=false` 表示宿主没挂 workspace-changes：App 不显示改动卡片、不请求下面两个端点。
+
+**GET `/m/api/changes/summary?sessionId=…&seq=…`** — 本轮改动摘要
+```json
+请求: GET /m/api/changes/summary?sessionId=s_abc&seq=812
+响应: {
+  "ok": true,
+  "summary": {
+    "turn": 4,
+    "cwd": "C:\\work\\demo",
+    "files": [
+      { "path": "lib\\main.dart", "display": "lib/main.dart", "added": 12, "deleted": 3 },
+      { "path": "assets\\logo.png", "display": "assets/logo.png", "binary": true },
+      { "path": "dump.json", "display": "dump.json", "oversized": true }
+    ],
+    "total": 3, "added": 12, "deleted": 3
+  }
+}
+```
+- `path`：会话工作目录相对路径，工作区外为绝对路径（Windows 保留原生分隔符）；`display`：排序键与展示名（始终斜杠分隔）。
+- `files` 按 `display` 码元序排序，最多 `maxFiles`（默认 500）条；`total`/`added`/`deleted` 是**完整**合计（含未列出的）。
+- 二进制（`binary`）与过大（`oversized`）文件没有行数，也没有对比。
+- 错误：`404 changes-not-found`（会话已释放 / Host 重启过 / 从未记录——App 据此不显示卡片）、`501 changes-unavailable`（宿主没挂该插件）、`400 bad-request`。
+
+**GET `/m/api/changes/diff?sessionId=…&seq=…&index=…`** — 某个文件的轮次前后对比
+```json
+请求: GET /m/api/changes/diff?sessionId=s_abc&seq=812&index=0
+响应: {
+  "ok": true,
+  "diff": {
+    "kind": "text",
+    "path": "lib\\main.dart", "display": "lib/main.dart",
+    "before": true, "after": true,
+    "hunks": [
+      { "oldStart": 10, "oldLines": 2, "newStart": 10, "newLines": 3,
+        "lines": [" keep", "-old line", "+new line", "+another"] }
+    ],
+    "coarse": false
+  }
+}
+```
+- `index` 是摘要 `files` 数组里的**原始下标**（不是文件名）。
+- 文本对比的每一行保留 `+` / `-` / 空格 前缀，上下文固定三行；`coarse=true` 表示逐行对比超时，已退化为整文件替换。
+- `before`/`after` 表示两侧是否存在：`false→true` 是本轮新建，`true→false` 是本轮删除，App 据此显示状态。
+- 非文本：`{ "kind": "binary" | "oversized", "path", "display" }`（没有 hunks）。
+- 错误：`404 changes-not-found`（该文件对比已不可用）、`501 changes-unavailable`、`400 bad-request`（`seq`/`index` 不是非负整数）。
+- 手机断开连接会中止 Host 侧的两次快照读取（`AbortSignal`）。
+
+**事件**：轮次结束时 Session 日志追加一条 `workspace/changes`（data 只有 `{ turn }`）。插件把它作为
+普通可见事件下发（摘要透传 `data.turn`），App 收到后按该事件的 `seq` 拉摘要——同一轮只保留最新一次宣告。
+
 
 
 

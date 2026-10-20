@@ -18,6 +18,7 @@ import '../timeline.dart';
 import '../theme.dart';
 import '../md.dart';
 import '../fmt.dart';
+import '../review/changes_card.dart';
 import 'sheets.dart';
 import 'harness_question_card.dart';
 import 'session_tools_sheet.dart';
@@ -1760,6 +1761,25 @@ class _ChatScreenState extends State<ChatScreen> {
         } else {
           out.insert(0, _MsgItem.divider(L10n.t('轮次 ${d?['turn']} 开始', 'Turn ${d?['turn']} started'), seq: ev.seq));
         }
+      case 'workspace/changes':
+        // v3.2.14（改动审阅）：本轮改动宣告。同一轮只保留最新一次（Host 语义：后一次
+        // 记录取代前一次；turn/end 补记会再来一条），卡片按 seq 事后拉摘要。
+        final changesTurn = (d?['turn'] as num?)?.toInt();
+        out.removeWhere((m) =>
+            m.kind == _MsgKind.event &&
+            m.eventType == 'workspace/changes' &&
+            (m.rawData?['turn'] as num?)?.toInt() == changesTurn);
+        final changesItem = _MsgItem.event(
+          eventType: 'workspace/changes',
+          text: '',
+          seq: ev.seq,
+          rawData: d,
+        );
+        if (history) {
+          out.add(changesItem);
+        } else {
+          out.insert(0, changesItem);
+        }
       case 'turn/end':
         if (!history || tail) {
           _draft = '';
@@ -3334,6 +3354,19 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         );
       case _MsgKind.event:
+        // v3.2.14（改动审阅）：改动宣告走专属卡片（摘要卡 → 点开审阅），不再铺成通用事件行。
+        // debug 模式下卡片照旧，原始事件由「更多」之外的调试入口查看（与其它事件一致）。
+        if (item.eventType == 'workspace/changes' && item.seq != null && _mySessionId != null) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: DshSpace.sm),
+            child: TurnChangesCard(
+              sessionId: _mySessionId!,
+              seq: item.seq!,
+              api: _api,
+              turn: (item.rawData?['turn'] as num?)?.toInt(),
+            ),
+          );
+        }
         // 协议/运行时元数据在普通模式不渲染（模型里仍保留 seq 与详情指针）；
         // 调试模式完整呈现。可见性判据与模型侧共用同一实现。
         if (!timelineTypeVisibleIn(
