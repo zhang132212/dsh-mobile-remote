@@ -330,11 +330,23 @@ bash tools/ios-ci/verdict.sh
 
 ## 12. 当前状态与后续
 
-- 2026-10-23 首轮 run（39981238189，commit f77ec5f）关键路径实测：
-  **环境信息 / 安装 Flutter 3.47.7 / pub get / flutter analyze / flutter test（全量）/ 设备版 release 构建**
-  全部 ✅（设备版构建 2 分 12 秒，**说明 Swift 编译与 SPM（无 Podfile）路径可用**）；
-  该轮在 build-sim 阶段被后续 push 的并发策略取消（未产出回传证据）。
-- v2（三 job + integration_test + 性能证据 + ci-artifacts 回传）为当前版本，待首轮完整跑通后更新本节。
+### 12.1 首轮完整实测（2026-10-23，run 39981868876 / commit 13643a7，v1 workflow）
+
+环境：**macOS 15.7.9 / Xcode 16.4 (16F6) / Flutter 3.47.7 / CocoaPods 1.17.0（未使用，走 SPM）**。
+
+| 结果 | 实测数据 |
+|---|---|
+| flutter analyze | ✅ 约 19s |
+| flutter test（全量） | ❌ 304 passed / 12 skipped / **3 failed**（全部是 %BT%test/sse_cancel_window_test.dart%BT% 的"残留连接"断言；同一文件在更早一轮 macOS 上是绿的 → 时序 flaky，T3 改为轮询等待中） |
+| build-device（release, no-codesign） | ✅ **2m39s**，Runner.app **23MB**，bundle id **com.dsh.remote**，3.2.10 (33)，arm64；Frameworks = App / Flutter / **objective_c**（native assets 正常）；插件 bundle 齐全 |
+| build-sim（debug, --simulator） | ✅ 约 2m26s，Runner.app **183MB**（universal x86_64+arm64） |
+| sim-smoke | ✅ 首次 boot 1m47s → install → launch **PID 22022** → 12s 后进程存活 → 截图 **62,924 bytes**（连接页完整渲染：标题/扫码连接/电脑地址/访问口令/连接，中文字体正常） |
+| 回传 ci-artifacts | ✅（该轮 status=failure 也照常回传，验证"失败也回传"） |
+| 整轮耗时 | 约 **14m51s**（iOS job） |
+
+结论：**Swift 编译、SPM（无 Podfile）、native assets（objective_c）、模拟器安装/启动/渲染全部通过**；
+唯一问题是 3 个对时序敏感的 SSE 连接释放测试用例（非平台性破坏）。
+v2（三 job + integration_test + 性能证据 + 兜底回传分支）为当前版本，首轮完整跑通后更新本节。
 - 待办：
   - integration_test 连续稳定后移出 `ALLOW_FAIL_STEPS` 转为阻塞；
   - 视需要给设备版/模拟器版构建加 SPM 缓存（当前设备版约 2-3 分钟，可接受）；

@@ -80,7 +80,7 @@ PY
   if [ -f "$APP_DIR/ios/Podfile" ]; then
     echo "  Podfile 存在（CocoaPods 路径；首次 pod install 可能 3-8 分钟）"
   else
-    echo "  Podfile 不存在 —— 预期行为（全插件支持 SPM，不需要 CocoaPods）"
+    echo "  Podfile 不存在 —— SPM 模式预期（Flutter 3.47 默认 Swift Package Manager，无 Podfile；ios/Flutter/ephemeral 下生成 SPM 包）"
   fi
   if [ -d "$APP_DIR/ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage" ]; then
     echo "  SPM 生成包存在（flutter build ios 会生成/刷新）"
