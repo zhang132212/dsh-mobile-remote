@@ -104,7 +104,7 @@ App 与 Android 共用同一套 Dart 代码与插件（`dsh-mobile-app/`），iO
 | 渲染 | ✅ Impeller（Metal） | iOS 上 Impeller 是**唯一**渲染引擎（不能切 Skia）；启动日志可见 `Using the Impeller rendering backend (Metal)` |
 | 系统版本 | iOS 15.0+ | 覆盖 iPhone 6s 及之后机型（Apple 支持范围）；模拟器验证为 iOS 26.2 / iPhone SE (3rd) |
 | 明文 HTTP | ✅ 仅限可信内网 | Flutter 走 dart:io socket，ATS 不拦截；真正门槛是「本地网络」权限（见下行）。ATS 配置为**放行任意加载**（理由：用户可自填任意 DSH 地址，含局域网/组网/自建 http）；`NSLocalNetworkUsageDescription` 单独保留 |
-| 本地网络权限 | ⚠️ 需用户允许 | iOS 14+ 首次连接局域网会弹系统授权；**拒绝或不理时首次请求会失败一次**——App 会自动退避重试，允许后即恢复；仍失败时到「设置 → 隐私与安全性 → 本地网络」放行 DSH Remote |
+| 本地网络权限 | ⚠️ 需用户允许 | iOS 14+ 首次连接局域网会弹系统授权；**拒绝或不理时首次请求会失败一次**——App 对 iOS 网络类错误会自动重试一次（1.5 秒后），允许后即恢复；仍失败会显示「设置 → 隐私与安全性 → 本地网络」引导和显式「重试」按钮（无需重填表单）。Android 无此权限概念，原提示文案不变 |
 | 扫码连接 | ✅ | mobile_scanner（AVFoundation）；首次需相机权限；也可从相册识别二维码（需相册权限）。模拟器无摄像头，相机链路需真机 |
 | 系统悬浮球 | ❌ 平台不支持 | iOS 无跨 App 悬浮窗 API。App 隐藏悬浮球入口并在设置页说明；后台提醒由 **Bark 推送**承担（与 Android 同一套推送配置，不依赖 App 存活） |
 | 后台常驻 / 后台 SSE | ❌ 平台不支持 | iOS 退后台后 App 会被挂起，无法像 Android 前台服务那样保持长连接。iOS 只保证**前台**实时流式；回前台自动重连并补拉。提醒走推送桥 |
@@ -121,7 +121,7 @@ App 与 Android 共用同一套 Dart 代码与插件（`dsh-mobile-app/`），iO
 - **系统悬浮球**：Android 的透明悬浮球依赖 `SYSTEM_ALERT_WINDOW` + 前台服务，iOS 没有对应能力。iOS 端不显示悬浮球入口，设置页给出说明；"人不在电脑前"的提醒由**推送桥**（Bark 等）承担。
 - **后台常驻**：iOS App 退到后台会被挂起，无法保持 SSE。iOS 端只保证**前台**实时；切回前台自动重连并补拉。
 - **App 内自更新**：iOS 不允许 App 自行下载安装 IPA；更新走 TestFlight / App Store。
-- **本地网络权限**：iOS 14+ 首次访问局域网需要用户授权（弹窗文案来自 `NSLocalNetworkUsageDescription`）。拒绝后局域网请求全部失败，需引导用户去系统设置放行。
+- **本地网络权限**：iOS 14+ 首次访问局域网需要用户授权（弹窗文案来自 `NSLocalNetworkUsageDescription`）。拒绝后局域网请求全部失败；App 的首次连接会**自动重试一次（1.5s）**，仍失败则给「设置 → 隐私与安全性 → 本地网络」引导与显式「重试」按钮（iOS 网络类错误专属；Android 提示不变）。
 
 **构建**（macOS + Xcode，Windows/Linux 无法构建 iOS）：
 
@@ -196,6 +196,6 @@ flutter build ios --simulator --debug         # 模拟器版，用于冒烟
 | S5 | docx/xlsx 解压无大小/条目上限 | 恶意压缩包（zip bomb）可打爆内存 | 解压前限制压缩比/条目数/总字节 | 上架前建议 |
 | P1 | 文档解析在主 isolate | 超大 docx/xlsx 解析时 UI 冻结 | 解析移到 isolate（compute） | 非阻塞 |
 | P2 | 流式回复每个 chunk 全量重新解析 Markdown | 长回复流式时 CPU 占用偏高 | 增量/分片解析或节流 | 非阻塞 |
-| P3 | 本地网络权限被拒后的引导文案偏 Android 措辞 | iOS 用户可能找不到设置入口 | iOS 文案改为「设置 → 隐私与安全性 → 本地网络」 | 非阻塞（建议随下个版本修） |
+| P3 | ~~本地网络权限被拒后的引导文案偏 Android 措辞~~ | iOS 用户可能找不到设置入口 | **已修复（v4 平台对等性）**：iOS 网络类错误自动重试一次（1.5s）+「设置 → 隐私与安全性 → 本地网络」引导 + 显式「重试」按钮；Android 提示文案保持不变 | 已完成（非阻塞） |
 
 **补充说明**：ATS 采用 `NSAllowsArbitraryLoads=true`（用户可配置任意 DSH 地址，含局域网/组网/自建 http）。注意 iOS 10+ 若同时声明 `NSAllowsLocalNetworking` 等细粒度键，系统会**忽略** `NSAllowsArbitraryLoads`、只放行本地网络，因此工程中**只保留** `NSAllowsArbitraryLoads`；本地网络隐私权限由 `NSLocalNetworkUsageDescription` 单独声明。公开上架时需在审核备注中说明明文 HTTP 的用途（仅连用户自建服务）。
