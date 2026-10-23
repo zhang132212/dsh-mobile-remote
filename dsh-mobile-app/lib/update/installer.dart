@@ -1,8 +1,9 @@
 // M1：APK 安装——经原生通道触发系统安装器（FileProvider content URI + 未知来源引导）。
 //
 // iOS 移植（T3）：iOS 不允许 App 内下载并安装可执行包（App Store 审核政策，也没有
-// 安装器 API）。入口在 UI 层（设置页）隐藏，这里再兜一层：直接返回
-// [ApkInstallResult.unsupportedPlatform]，不触碰 dsh/update 通道（iOS 侧未实现）。
+// 安装器 API）。原生 dsh/update 通道在 iOS 已实现且 installApk 恒返回 false；
+// 但入口在 UI 层（设置页）隐藏，这里再兜一层：直接返回
+// [ApkInstallResult.unsupportedPlatform]，不发起无意义的通道调用。
 import 'dart:io';
 
 import 'package:flutter/services.dart';

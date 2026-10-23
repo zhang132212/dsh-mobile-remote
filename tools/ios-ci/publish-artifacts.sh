@@ -19,21 +19,36 @@ WORK="${RUNNER_TEMP:-/tmp}/ci-artifacts-publish"
 rm -rf "$WORK"
 mkdir -p "$WORK"
 
-copied=0
-skipped=0
-for src in $(find "$CI_OUT" -type f 2>/dev/null); do
+SKIP_GLOBS="${ARTIFACT_SKIP_GLOBS:-}"   # 空格分隔的 glob，例如 "*.zip *.ips"
+TOTAL="$(find "$CI_OUT" -type f 2>/dev/null | wc -l | tr -d ' ')"
+# -print0 + read -d '' 处理带空格的文件名（bash 3.2 支持）
+find "$CI_OUT" -type f -print0 2>/dev/null | while IFS= read -r -d '' src; do
   rel="${src#$CI_OUT/}"
+  skip=""
+  if [ -n "$SKIP_GLOBS" ]; then
+    for glob in $SKIP_GLOBS; do
+      case "$rel" in
+        $glob) skip="1" ;;
+      esac
+      case "$(basename "$rel")" in
+        $glob) skip="1" ;;
+      esac
+    done
+  fi
+  if [ -n "$skip" ]; then
+    log "⚠️ 按 glob 跳过: $rel"
+    continue
+  fi
   size="$(stat -f%z "$src" 2>/dev/null || stat -c%s "$src" 2>/dev/null || echo 0)"
   if [ "$size" -gt "$MAX_BYTES" ] 2>/dev/null; then
     log "⚠️ 跳过超大文件（>$MAX_BYTES bytes）: $rel ($(du -h "$src" | cut -f1))"
-    skipped=$((skipped + 1))
     continue
   fi
   mkdir -p "$WORK/$(dirname "$rel")"
   cp "$src" "$WORK/$rel" || log "⚠️ 复制失败: $rel"
-  copied=$((copied + 1))
 done
-log "待推送文件: $copied 个（跳过超大 $skipped 个）"
+COPIED="$(find "$WORK" -type f 2>/dev/null | wc -l | tr -d ' ')"
+log "待推送文件: $COPIED 个（总计 $TOTAL，跳过 $((TOTAL - COPIED)) 个）"
 
 cd "$WORK" || exit 1
 git init -q

@@ -48,8 +48,9 @@ class FileBridgeException implements Exception {
 /// `dsh/files` 通道封装（Android: MainActivity / iOS: AppDelegate 同名通道）。
 ///
 /// 方法：
-///   saveToDownloads {name, bytes} → 原生返回**展示用位置串**（如 "App 文稿/DSH-Remote/x.docx"，
-///     不是完整沙盒路径——那会出现在 toast 里）；
+///   saveToDownloads {name, bytes, share?} → 原生返回**展示用位置串**
+///     （iOS 为相对 App 文稿的 "DSH-Remote/文件名"；Android 为下载目录展示串；
+///     都不是完整沙盒路径——那会出现在 toast 里）；
 ///   pickFile → {name, bytes} | null（用户取消）；
 ///   getIncomingFile → {name, bytes} | null（冷启动暂存的外部文档）；
 ///   clearIncomingFile → 清理暂存。
@@ -112,12 +113,23 @@ class FileBridge {
         'This file operation is not supported by the current build; please update the app',
       ));
     } on PlatformException catch (e) {
+      // cross-review F6：Android 取消文件选择走 error('cancelled')（MainActivity.kt），
+      // 契约语义应等同「用户取消」→ 返回 null，而不是弹「文件操作失败：cancelled」。
+      if (e.code == 'cancelled') return null;
       throw FileBridgeException(_describePlatformError(e));
     }
   }
 
-  /// 把原生错误码翻译成用户能看懂的话（T2 约定：pickFile 读取失败 = `read-failed`；
-  /// 保存失败 = `save-failed`）。未知码兜底带上原生 message/code，避免丢排障信息。
+  /// 把原生错误码翻译成用户能看懂的话（cross-review F5）。
+  ///
+  /// 当前 T2（2026-10-24）在用码：
+  ///   · read-failed  picker 选中的文件读取失败/为空
+  ///   · save-failed  saveToDownloads 写盘失败
+  ///   · pick-failed  presenter 不可用 / document picker 弹不出来（原 no-view 已废弃）
+  ///   · busy         已有文件选择器在弹
+  ///   · too-large    文件超过 24MB（与原生 kMaxDocBytes 一致）
+  /// 兼容保留：no-view（旧构建）、bad-args（历史码）——同样翻成中文，
+  /// 确保任何版本都不会把英文 code 直接冒到用户面前；未知码兜底带上原生 message/code。
   static String _describePlatformError(PlatformException e) {
     final detail = (e.message ?? '').trim();
     return switch (e.code) {
@@ -133,10 +145,46 @@ class FileBridge {
           '打开文件选择器失败',
           'Failed to open the file picker',
         ),
+      'bad-args' => L10n.t('文件参数异常', 'Invalid file arguments'),
+      'busy' => L10n.t(
+          '正在选择文件，请稍候',
+          'A file picker is already open, please wait',
+        ),
+      'no-view' => L10n.t(
+          '当前界面暂不可用，请稍后重试',
+          'The current screen is unavailable, please try again later',
+        ),
+      'too-large' => L10n.t(
+          '文件过大（上限 24MB）',
+          'File is too large (24MB limit)',
+        ),
       _ => L10n.t(
           '文件操作失败：${detail.isEmpty ? e.code : detail}',
           'File operation failed: ${detail.isEmpty ? e.code : detail}',
         ),
     };
+  }
+}
+
+/// 外部文档「同一次投递」去重（cross-review F3）。
+///
+/// 背景：原生侧 docDelivered 已保证同一次投递只上报一次（事件推送 openDocument 与
+/// 首帧 getIncomingFile 不会双报），因此 Dart 侧**不能再按 5 秒时间窗去重**——
+/// 那会把「打开文档 → 返回 → 马上再打开同一文件」这种合法操作静默吞掉（无提示）。
+///
+/// 这里只按原生**可选**携带的 deliveryId 做精确去重：id 相同 = 同一次投递的重复回调，
+/// 忽略；无 deliveryId（当前 iOS/Android 契约）→ 一律放行，去重由原生负责。
+class IncomingDocDeduper {
+  String? _lastAcceptedDeliveryId;
+
+  /// 返回 true = 应处理本次投递；false = 同一次投递的重复回调（或参数非法）。
+  bool shouldAccept(dynamic args) {
+    if (args is! Map) return false;
+    final id = args['deliveryId'];
+    if (id is String && id.isNotEmpty) {
+      if (id == _lastAcceptedDeliveryId) return false;
+      _lastAcceptedDeliveryId = id;
+    }
+    return true;
   }
 }

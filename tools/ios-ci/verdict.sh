@@ -128,10 +128,27 @@ sizes_value() { sed -n "s/^$1=//p" "$CI_OUT/sizes.txt" 2>/dev/null | head -1; }
   fi
   if [ -n "$allowed" ]; then
     echo ""
-    echo "允许失败（不影响结论）："
+    echo "> ⚠️ **以下步骤失败但被允许列表放行，不能当成绿**：$allowed —— 例如 integration-test 失败说明端到端冒烟没跑通，需人工确认。"
+    echo ""
     for item in $allowed; do
       echo "- $item"
     done
+  fi
+  INTEG_OUTCOME="$(sed -n 's/^integration-test=//p' "$CI_OUT/steps.txt" 2>/dev/null | head -1)"
+  echo ""
+  echo "## 端到端冒烟（integration_test）"
+  echo ""
+  case "$INTEG_OUTCOME" in
+    success) echo "✅ **integration-test: success** —— 模拟器上真机形态端到端冒烟已跑通（不是允许失败放行）。" ;;
+    skipped) echo "⏭️ integration-test: skipped（前置步骤失败或未执行）。" ;;
+    "") echo "integration-test: 未记录（步骤未运行）。" ;;
+    *) echo "❌ **integration-test: $INTEG_OUTCOME** —— 当前在 ALLOW_FAIL_STEPS 里放行（不影响结论），但这说明端到端冒烟没跑通，需人工确认。" ;;
+  esac
+  if [ -f "$CI_OUT/test-failures.txt" ] && [ -s "$CI_OUT/test-failures.txt" ]; then
+    echo ""
+    echo "## flutter test 失败行（摘自全量日志，前 15 行）"
+    echo ""
+    head -15 "$CI_OUT/test-failures.txt" | sed 's/^/    /'
   fi
   if [ -n "$skipped" ]; then
     echo ""

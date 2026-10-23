@@ -81,10 +81,10 @@ jobs:
           XCODE_APP: ${{ github.event.inputs.xcode_app }}
         run: bash tools/ios-ci/check-env.sh
 
-      - name: iOS 工程配置检查（信息性，不阻塞）
+      # 工程缺失（pbxproj 不存在）时直接失败：此时构建也必然失败，早点暴露省时间
+      - name: iOS 工程配置检查（工程缺失则失败；其余项仅记录）
         id: ios_project
         if: always() && steps.checkout.outcome == 'success'
-        continue-on-error: true
         run: bash tools/ios-ci/check-ios-project.sh
 
       - name: 安装 Flutter 3.47.7（subosito/flutter-action，带缓存）
@@ -164,14 +164,17 @@ jobs:
             echo "integration_test/ 目录不存在，跳过（dart-platform 提交后自动生效）" | tee -a "$BUILD_LOG"
             exit 0
           fi
-          UDID="$(sed -n 's/^udid=//p' "$CI_OUT/sim-udid.txt" 2>/dev/null | head -1)"
-          if [ -n "$UDID" ]; then
-            echo "使用冒烟步骤启动的模拟器: $UDID" | tee -a "$BUILD_LOG"
-            flutter test integration_test -d "$UDID" --reporter expanded 2>&1 | tee -a "$BUILD_LOG"
-          else
-            echo "⚠️ 未拿到 sim-udid.txt，退化用 -d iPhone 选择设备" | tee -a "$BUILD_LOG"
-            flutter test integration_test -d iPhone --reporter expanded 2>&1 | tee -a "$BUILD_LOG"
+          # UDID 来源：sim-smoke.sh 先写 sim-info.txt（udid= 键值），再写 sim-udid.txt（裸 UDID 一行）
+          UDID="$(sed -n 's/^udid=//p' "$CI_OUT/sim-info.txt" 2>/dev/null | head -1)"
+          [ -n "$UDID" ] || UDID="$(head -1 "$CI_OUT/sim-udid.txt" 2>/dev/null || true)"
+          UDID="$(printf '%s' "$UDID" | tr -d '[:space:]')"
+          if [ -z "$UDID" ]; then
+            echo "❌ 无法定位冒烟用的模拟器 UDID（sim-info.txt / sim-udid.txt 均不可用）；不做 name 兜底，直接失败以免跑错设备" | tee -a "$BUILD_LOG"
+            exit 1
           fi
+          echo "使用冒烟步骤启动的模拟器 UDID: $UDID" | tee -a "$BUILD_LOG"
+          xcrun simctl list devices booted 2>&1 | tee -a "$BUILD_LOG" || true
+          flutter test integration_test -d "$UDID" --reporter expanded 2>&1 | tee -a "$BUILD_LOG"
 
       - name: 收集产物（清单 / 日志 / 截图 / golden 失败图）
         id: collect
@@ -212,7 +215,8 @@ jobs:
           retention-days: 7
 
       # 兜底通道：即使 report job / artifact 传递出问题，也能从 ci-artifacts-ios 分支拿到 iOS 全量日志。
-      # 只推小文件（<1MB），跳过设备版 .app 归档；正式证据仍以 report job 的 ci-artifacts 为准。
+      # 只推小文件（阈值 8MB），并显式排除 *.zip 归档（设备版 .app 约 12MB，不该重复推）；
+      # 正式证据仍以 report job 的 ci-artifacts 为准。
       - name: 兜底回传 iOS 证据（直传 ci-artifacts-ios 分支）
         id: publish_fallback
         if: always() && steps.checkout.outcome == 'success'
@@ -221,6 +225,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACTS_BRANCH: ci-artifacts-ios
           ARTIFACT_MAX_BYTES: "8388608"
+          ARTIFACT_SKIP_GLOBS: "*.zip"
         run: bash tools/ios-ci/publish-artifacts.sh
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -255,13 +260,26 @@ jobs:
           chmod +x tools/ios-ci/*.sh 2>/dev/null || true
           echo "CI 脚本换行已规范化（幂等）" > "$BUILD_LOG"
 
-      - name: 安装 JDK 17
+      # 工程用 AGP 9.1.0 / Gradle 9.5.0；JDK 21 同时满足 AGP 与 Gradle 要求（JDK 17 亦可用，选 21 更稳）
+      - name: 安装 JDK 21
         id: java
         continue-on-error: true
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
+
+      - name: 记录 Android 工具链版本（JDK / Gradle / SDK）
+        id: toolchain
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          printf '\n===== STEP android-toolchain  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
+          java -version 2>&1 | tee -a "$BUILD_LOG"
+          echo "JAVA_HOME=${JAVA_HOME:-}" | tee -a "$BUILD_LOG"
+          grep distributionUrl dsh-mobile-app/android/gradle/wrapper/gradle-wrapper.properties 2>/dev/null | tee -a "$BUILD_LOG" || true
+          echo "ANDROID_HOME=${ANDROID_HOME:-} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}" | tee -a "$BUILD_LOG"
+          grep -o 'com.android.application[^\"]*' dsh-mobile-app/android/settings.gradle.kts 2>/dev/null | head -1 | tee -a "$BUILD_LOG" || true
 
       - name: 安装 Flutter 3.47.7
         id: install
@@ -295,8 +313,34 @@ jobs:
         run: |
           set -uo pipefail
           printf '\n===== STEP build-apk  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
-          # 仓库没有 key.properties，release 会回退 debug 签名（见 android/app/build.gradle.kts），CI 可构建
-          flutter build apk --release --no-pub 2>&1 | tee -a "$BUILD_LOG"
+          # v2 首跑实测根因：前一步 flutter pub get 以 releaseMode=false 生成 GeneratedPluginRegistrant.java
+          #（含 dev 依赖 integration_test），而 build 带 --no-pub 时不会以 releaseMode=true 重新注入插件，
+          # 于是 release 编译找不到 dev.flutter.plugins.integration_test。
+          # 修法（双保险）：
+          #   ① flutter build 不带 --no-pub（构建自己以 release 模式重新生成 registrant，过滤 dev 依赖）；
+          #   ② 仍临时摘掉 integration_test dev 依赖（lib/ 不允许 import dev 依赖，语义等价），
+          #      即使未来 Flutter 版本行为再变也能拿到干净的 release 编译证据；构建后立即恢复。
+          cp pubspec.yaml /tmp/pubspec.yaml.ci-bak
+          cp pubspec.lock /tmp/pubspec.lock.ci-bak
+          awk '
+            /^  integration_test:$/ { skip = 1; next }
+            skip == 1 && /^[[:space:]]+sdk:[[:space:]]+flutter[[:space:]]*$/ { skip = 0; next }
+            { print }
+          ' pubspec.yaml > /tmp/pubspec.yaml.ci-stripped
+          if cmp -s pubspec.yaml /tmp/pubspec.yaml.ci-stripped; then
+            echo "⚠️ pubspec.yaml 未变化：未找到 integration_test 依赖，按原样构建" | tee -a "$BUILD_LOG"
+          else
+            mv /tmp/pubspec.yaml.ci-stripped pubspec.yaml
+            echo "已临时移除 integration_test dev 依赖（仅 CI 工作区，构建后恢复）" | tee -a "$BUILD_LOG"
+          fi
+          flutter pub get 2>&1 | tee -a "$BUILD_LOG"
+          # 仓库没有 key.properties，release 会回退 debug 签名（见 android/app/build.gradle.kts），CI 可构建。
+          # 注意：不要加 --no-pub —— 必须让 build 以 release 模式重新注入插件（见上方根因说明）。
+          flutter build apk --release 2>&1 | tee -a "$BUILD_LOG"
+          RC=$?
+          cp /tmp/pubspec.yaml.ci-bak pubspec.yaml
+          cp /tmp/pubspec.lock.ci-bak pubspec.lock
+          exit $RC
 
       - name: 收集 Android 证据
         id: collect
@@ -401,8 +445,12 @@ jobs:
             echo "❌ iOS job 结果不是 success"
             exit 1
           fi
+          # 证据回传失败不影响构建结论（两者解绑）：只报警告，靠 ci-artifacts 分支是否更新来判断回传状态
           if [ "${PUBLISH_OUTCOME:-}" != "success" ]; then
-            echo "⚠️ 产物回传（ci-artifacts 分支）未成功，本次证据只能看 Actions 页面：设置 Settings -> Actions -> General -> Workflow permissions 为 Read and write。"
-            exit 1
+            echo "::warning::证据回传（ci-artifacts 分支）未成功（PUBLISH_OUTCOME=${PUBLISH_OUTCOME:-missing}），但 iOS 构建结论不受影响；请检查仓库 Settings -> Actions -> General -> Workflow permissions（需 Read and write）或查看 report job 日志。"
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+              echo "> ⚠️ 证据回传未成功（PUBLISH_OUTCOME=${PUBLISH_OUTCOME:-missing}），不影响 iOS 结论；以 ci-artifacts 分支更新为准。" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+            fi
           fi
-          echo "✅ iOS 全部通过（Android 回归结果见 ci-artifacts 分支 summary.md）"
+          echo "✅ iOS 结论通过（证据回传状态见上方 warning，若无 warning 即为成功）"

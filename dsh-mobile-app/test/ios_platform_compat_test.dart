@@ -225,6 +225,42 @@ void main() {
         ),
       );
     });
+
+    test('F5：原生错误码 → 中文可读提示（当前 T2 全部在用码 + 兼容旧码）', () async {
+      final expected = <String, String>{
+        // T2 2026-10-24 在用码
+        'read-failed': '读取文件失败',
+        'save-failed': '保存文件失败',
+        'pick-failed': '打开文件选择器失败',
+        'busy': '正在选择文件',
+        'too-large': '文件过大',
+        // 兼容旧构建 / 历史码（原 no-view 已被 pick-failed 取代，仍翻译）
+        'no-view': '当前界面暂不可用',
+        'bad-args': '文件参数异常',
+      };
+      for (final entry in expected.entries) {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(FileBridge.channel, (call) async {
+          throw PlatformException(code: entry.key);
+        });
+        await expectLater(
+          FileBridge.pickFile(),
+          throwsA(
+            isA<FileBridgeException>()
+                .having((e) => e.message, 'message', contains(entry.value)),
+          ),
+          reason: '错误码 ${entry.key} 必须翻译成中文，不能把英文 code 冒给用户',
+        );
+      }
+    });
+
+    test('F6：Android 取消上传（code=cancelled）→ 等同用户取消返回 null，不弹失败', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(FileBridge.channel, (call) async {
+        throw PlatformException(code: 'cancelled');
+      });
+      expect(await FileBridge.pickFile(), isNull);
+    });
   });
 
   group('Update · iOS 不支持 App 内自更新', () {

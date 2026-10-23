@@ -112,7 +112,8 @@ void main() {
     await waitNoResidualConnections(s, reason: '正常取消必须释放连接');
     // ignore: avoid_print
     print('对照: responses=${s.responses} 残留连接=${s.openConnections}');
-  });
+    // flutter_test 单测默认 30s 超时；这里最长轮询 15s，显式给到 90s 留足余量（CI 硬门禁）。
+  }, timeout: Timeout(const Duration(seconds: 90)));
 
   test('取消窗口：响应到达前取消（resume/switchBase/disposeBridge 的动作）', () async {
     final s = await FakeSse.start(beforeRespond: const Duration(milliseconds: 900));
@@ -125,7 +126,7 @@ void main() {
         reason: '晚到的响应必须被消费并释放（api.dart eventsRaw 的已取消守卫）');
     // ignore: avoid_print
     print('取消窗口: responses=${s.responses} 残留连接=${s.openConnections}');
-  });
+  }, timeout: Timeout(const Duration(seconds: 90)));
 
   test('窗口内连续重建 3 次 → 泄漏连接线性累积', () async {
     final s = await FakeSse.start(beforeRespond: const Duration(milliseconds: 700));
@@ -141,5 +142,5 @@ void main() {
     await waitNoResidualConnections(s, reason: '每次窗口内重建都不该留下半个 socket');
     // ignore: avoid_print
     print('重连 x3: responses=${s.responses} 残留连接=${s.openConnections}');
-  });
+  }, timeout: Timeout(const Duration(seconds: 90)));
 }

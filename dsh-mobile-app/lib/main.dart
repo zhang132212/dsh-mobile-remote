@@ -138,20 +138,9 @@ class _DshAppState extends State<DshApp> {
     return null;
   }
 
-  /// 本轮已处理的文档指纹（避免「事件推送」与「主动拉取」双路径重复弹同一份）。
-  String? _docSeenKey;
-  DateTime _docSeenAt = DateTime.fromMillisecondsSinceEpoch(0);
-
-  bool _isDuplicateDoc(String name, Uint8List bytes) {
-    final key = '$name:${bytes.length}';
-    final now = DateTime.now();
-    if (_docSeenKey == key && now.difference(_docSeenAt) < const Duration(seconds: 5)) {
-      return true;
-    }
-    _docSeenKey = key;
-    _docSeenAt = now;
-    return false;
-  }
+  /// 外部文档「同一次投递」去重（cross-review F3：不再用 5s 时间窗，
+  /// 避免吞掉「打开→返回→马上再打开同一文件」；同一次投递的去重由原生 docDelivered 负责）。
+  final IncomingDocDeduper _docDeduper = IncomingDocDeduper();
 
   /// 冷启动兜底：原生已暂存但事件早于 handler 注册时，首帧后主动取一次。
   Future<void> _pullPendingDoc() async {
@@ -171,6 +160,12 @@ class _DshAppState extends State<DshApp> {
   /// 打开外部传入的文档：推到统一的文档阅读页。
   Future<void> _openIncomingDoc(dynamic args) async {
     if (args is! Map) return;
+    // cross-review F3：「同一次投递」去重（只认原生可选的 deliveryId）。
+    // 不用时间窗——否则「打开文档→返回→5s 内再打开同一文件」会被静默吞掉。
+    if (!_docDeduper.shouldAccept(args)) {
+      AppLog.instance.log('[doc] 同一次投递的重复回调，忽略');
+      return;
+    }
     final name = args['name'];
     AppLog.instance.log('[doc] 收到外部文档 name=$name '
         'bytes=${(args['bytes'] as List?)?.length ?? 0} err=${args['error']}');
@@ -200,14 +195,31 @@ class _DshAppState extends State<DshApp> {
       AppLog.instance.log('[doc] 参数不完整，忽略（bytes/name 缺失）');
       return;
     }
-    if (_isDuplicateDoc(name, bytes)) {
-      AppLog.instance.log('[doc] 重复投递，忽略');
-      return;
-    }
-
-    final nav = rootNavigatorKey.currentState;
+    var nav = rootNavigatorKey.currentState;
     if (nav == null) {
-      AppLog.instance.log('[doc] 导航器未就绪，放弃打开');
+      // cross-review F4：导航器未就绪不能直接丢弃（否则这次「用 DSH Remote 打开」
+      // 永久丢失、原生暂存字节常驻）。等一帧 + 300ms 兜底重试一次。
+      AppLog.instance.log('[doc] 导航器未就绪，等待首帧后重试一次');
+      await _waitForNavigatorRetry();
+      if (!mounted) return;
+      nav = rootNavigatorKey.currentState;
+    }
+    if (nav == null) {
+      // 重试仍不就绪：清理原生暂存并给用户可读提示（不能静默丢）。
+      AppLog.instance.log('[doc] 重试后导航器仍未就绪：清理暂存并提示用户');
+      try {
+        await FileBridge.clearIncomingFile();
+      } catch (_) {/* 清理失败不影响提示 */}
+      final msgr = _rootMessenger();
+      if (msgr != null) {
+        showToastAt(
+          msgr,
+          L10n.t(
+            '无法打开该文件：界面尚未就绪，请重新打开',
+            'Cannot open the file: the app UI is not ready yet, please try again',
+          ),
+        );
+      }
       return;
     }
     try {
@@ -219,6 +231,18 @@ class _DshAppState extends State<DshApp> {
         builder: (_) => DocViewerScreen(name: name, bytes: bytes),
       ),
     );
+  }
+
+  /// 等首帧（navigator/Overlay 首帧后才可用）+ 300ms 兜底，供外部文档投递重试一次用。
+  Future<void> _waitForNavigatorRetry() {
+    final done = Completer<void>();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!done.isCompleted) done.complete();
+    });
+    Future<void>.delayed(const Duration(milliseconds: 300), () {
+      if (!done.isCompleted) done.complete();
+    });
+    return done.future;
   }
 
   /// 取一个可用的 ScaffoldMessenger（用于无页面 context 的异步回调里弹提示）。

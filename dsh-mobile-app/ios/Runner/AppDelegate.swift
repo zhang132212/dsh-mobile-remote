@@ -48,6 +48,13 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
   private static let filesChannelName = "dsh/files"
   private static let updateChannelName = "dsh/update"
   private static let savedFolderName = "DSH-Remote"
+  /// 外部文档 / picker 选择的文件大小上限。与 Dart 侧 lib/docs/loader.dart 的
+  /// kMaxDocBytes = 24 * 1024 * 1024 对齐：超过上限不读内容，直接回报 too-large，
+  /// 避免 iCloud 未下载的大文件把主线程/内存拖爆。
+  private static let maxDocBytes = 24 * 1024 * 1024
+  /// 文档投递成功后暂存字节的释放宽限：invokeMethod 不保证 Dart 已注册 handler，
+  /// Dart 首帧还会 getIncomingFile 兜底，所以不能立刻清；宽限到期后释放避免常驻内存。
+  private static let pendingDocReleaseDelay: TimeInterval = 60
 
   private var filesChannel: FlutterMethodChannel?
   private var updateChannel: FlutterMethodChannel?
@@ -59,6 +66,8 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
   private var pendingDoc: [String: Any]?
   /// 去重：投递成功置 true，Dart 侧 clearIncomingFile 后复位；避免同一文档弹两次。
   private var docDelivered = false
+  /// 暂存代际号：防止旧文档的延迟释放定时器误清掉新文档。
+  private var pendingDocGeneration: UInt64 = 0
   /// 系统文件选择器的回调（同一时刻只允许一个选择器）。
   private var pendingPickResult: FlutterResult?
 
@@ -68,7 +77,7 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
     viewController = registrar.viewController
     let messenger = registrar.messenger()
 
-    let files = FlutterMethodChannel(name: Self.filesChannelName, binaryMessenger: messenger)
+    let files = FlutterMethodChannel(name: DshNativeBridge.filesChannelName, binaryMessenger: messenger)
     files.setMethodCallHandler { [weak self] call, result in
       guard let self else {
         result(FlutterMethodNotImplemented)
@@ -78,7 +87,7 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
     }
     filesChannel = files
 
-    let update = FlutterMethodChannel(name: Self.updateChannelName, binaryMessenger: messenger)
+    let update = FlutterMethodChannel(name: DshNativeBridge.updateChannelName, binaryMessenger: messenger)
     update.setMethodCallHandler { call, result in
       // iOS 无应用内自更新：安装 APK 的功能恒不可用，安全返回 false（Dart 侧会提示降级）。
       if call.method == "installApk" {
@@ -116,29 +125,29 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
   /// 保存到 App 文稿目录（Documents/DSH-Remote，开启 UIFileSharingEnabled 后可在「文件」App 看到）。
   ///
   /// 返回值语义与 Android 侧对齐，但改为**人类可读文案**（不暴露沙盒绝对路径，
-  /// 因为 Dart 侧会把它直接拼进 toast）。例："App 文稿/DSH-Remote/报告.docx"。
+  /// 因为 Dart 侧会把它直接拼进 toast）。例："DSH-Remote/报告.docx"。
   private func saveToDownloads(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     guard let args = call.arguments as? [String: Any] else {
       result(FlutterError(code: "bad-args", message: "missing arguments", details: nil))
       return
     }
-    let name = Self.sanitizedFileName((args["name"] as? String) ?? "file")
+    let name = DshNativeBridge.sanitizedFileName((args["name"] as? String) ?? "file")
     guard let typed = args["bytes"] as? FlutterStandardTypedData else {
       result(FlutterError(code: "bad-args", message: "missing bytes", details: nil))
       return
     }
     do {
-      let dir = try documentsDirectory().appendingPathComponent(Self.savedFolderName, isDirectory: true)
+      let dir = try documentsDirectory().appendingPathComponent(DshNativeBridge.savedFolderName, isDirectory: true)
       try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
       let fileURL = dir.appendingPathComponent(name)
       try typed.data.write(to: fileURL, options: .atomic)
-      // 可选：Dart 侧传 share=true 时弹系统分享面板（默认不弹，文件在「文件」App 可见）。
+      // 可选：Dart 侧传 share=true 时弹系统分享面板（不阻塞 result，toast 立即返回）。
       if (args["share"] as? Bool) == true {
         presentShareSheet(for: fileURL)
       }
       // 只返回「DSH-Remote/文件名」这种人类可读相对位置：Dart 侧 iOS 文案会拼成
       // 「已保存到 App 文稿：DSH-Remote/xxx（可在「文件」App 查看）」，不要重复前缀、也不要暴露沙盒绝对路径。
-      result("\(Self.savedFolderName)/\(name)")
+      result("\(DshNativeBridge.savedFolderName)/\(name)")
     } catch {
       result(FlutterError(code: "save-failed", message: error.localizedDescription, details: nil))
     }
@@ -151,18 +160,31 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
       result(FlutterError(code: "busy", message: "already picking", details: nil))
       return
     }
-    guard let presenter = presentingViewController() else {
-      result(FlutterError(code: "no-view", message: "no view controller to present picker", details: nil))
+    guard let presenter = presentingViewController(),
+          presenter.viewIfLoaded?.window != nil,
+          presenter.presentedViewController == nil
+    else {
+      // 没有可用 presenter（opening 转场中 / App 不可见）：立刻回报，避免 Dart await 永久挂起。
+      result(FlutterError(code: "pick-failed", message: "no presenter available", details: nil))
       return
     }
-    pendingPickResult = result
+    // 去掉 .item（public.item 含文件夹），避免用户选中文件夹后读取失败。
     let picker = UIDocumentPickerViewController(
-      forOpeningContentTypes: [.data, .item, .text, .image, .movie],
+      forOpeningContentTypes: [.data, .text, .image, .movie],
       asCopy: true
     )
     picker.delegate = self
     picker.allowsMultipleSelection = false
+    pendingPickResult = result
     presenter.present(picker, animated: true)
+    // present 在转场中/视图不在层级上时可能静默失败：短延迟校验，失败则回报并复位，
+    // 防止一次性失败后 pendingPickResult 永久占用导致之后每次 pickFile 都 busy。
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self, weak picker] in
+      guard let self, let picker, let completion = self.pendingPickResult else { return }
+      guard picker.presentingViewController == nil else { return }
+      self.pendingPickResult = nil
+      completion(FlutterError(code: "pick-failed", message: "document picker was not presented", details: nil))
+    }
   }
 
   // MARK: - UIDocumentPickerDelegate
@@ -174,20 +196,37 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
       completion(nil)
       return
     }
-    do {
-      let data = try readData(from: url)
-      guard !data.isEmpty else {
-        completion(FlutterError(code: "read-failed", message: "empty file", details: nil))
-        return
+    let name = url.lastPathComponent.isEmpty ? "file" : url.lastPathComponent
+    // 读文件放到后台队列（iCloud 占位文件可能触发下载），读完回主线程回调，
+    // 避免大文件解析阻塞主线程导致 UI 卡顿/看门狗误判。
+    DispatchQueue.global(qos: .userInitiated).async {
+      do {
+        guard let data = try DshNativeBridge.readDocument(at: url, maxBytes: DshNativeBridge.maxDocBytes) else {
+          DispatchQueue.main.async {
+            completion(FlutterError(
+              code: "too-large",
+              message: "file exceeds \(DshNativeBridge.maxDocBytes / (1024 * 1024))MB limit",
+              details: nil
+            ))
+          }
+          return
+        }
+        guard !data.isEmpty else {
+          DispatchQueue.main.async {
+            completion(FlutterError(code: "read-failed", message: "empty file", details: nil))
+          }
+          return
+        }
+        let payload: [String: Any] = [
+          "name": name,
+          "bytes": FlutterStandardTypedData(bytes: data),
+        ]
+        DispatchQueue.main.async { completion(payload) }
+      } catch {
+        DispatchQueue.main.async {
+          completion(FlutterError(code: "read-failed", message: error.localizedDescription, details: nil))
+        }
       }
-      let name = url.lastPathComponent.isEmpty ? "file" : url.lastPathComponent
-      let payload: [String: Any] = [
-        "name": name,
-        "bytes": FlutterStandardTypedData(bytes: data),
-      ]
-      completion(payload)
-    } catch {
-      completion(FlutterError(code: "read-failed", message: error.localizedDescription, details: nil))
     }
   }
 
@@ -200,44 +239,82 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
   // MARK: - 外部文档打开（file:// / security-scoped URL）
 
   /// 处理系统投递进来的外部文档 URL；返回是否已识别为文档。
+  ///
+  /// 注意：读字节在后台队列完成，冷启动时系统回调不会等读盘，避免阻塞主线程。
   @discardableResult
   func handleIncomingURL(_ url: URL) -> Bool {
     guard url.isFileURL else { return false }
     let name = url.lastPathComponent.isEmpty ? "document" : url.lastPathComponent
-    do {
-      let data = try readData(from: url)
-      var payload: [String: Any] = ["name": name]
-      if data.isEmpty {
-        payload["error"] = "empty"
-      } else {
-        payload["bytes"] = FlutterStandardTypedData(bytes: data)
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      guard let self else { return }
+      do {
+        guard let data = try DshNativeBridge.readDocument(at: url, maxBytes: DshNativeBridge.maxDocBytes) else {
+          self.storeIncomingDoc(name: name, error: "too-large")
+          return
+        }
+        if data.isEmpty {
+          self.storeIncomingDoc(name: name, error: "empty")
+        } else {
+          self.storeIncomingDoc(name: name, bytes: data)
+        }
+      } catch {
+        // 读失败也要投给 Dart：用户点了「用 DSH Remote 打开」却毫无反应会以为 App 坏了。
+        self.storeIncomingDoc(name: name, error: error.localizedDescription)
       }
-      pendingDoc = payload
-    } catch {
-      // 读失败也要投给 Dart：用户点了「用 DSH Remote 打开」却毫无反应会以为 App 坏了。
-      pendingDoc = ["name": name, "error": error.localizedDescription]
     }
-    docDelivered = false
-    deliverPendingDoc()
     return true
+  }
+
+  /// 暂存外部文档（主线程），并尝试投递。bytes 为空表示只带 error。
+  private func storeIncomingDoc(name: String, bytes: Data? = nil, error: String? = nil) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      DshNativeBridge.assertMainThread()
+      var payload: [String: Any] = ["name": name]
+      if let error {
+        payload["error"] = error
+      }
+      if let bytes {
+        payload["bytes"] = FlutterStandardTypedData(bytes: bytes)
+      }
+      self.pendingDoc = payload
+      self.docDelivered = false
+      self.pendingDocGeneration &+= 1
+      self.deliverPendingDoc()
+    }
   }
 
   /// 把暂存文档投给 Dart（引擎/通道未就绪时 no-op，等 attach 后再补投）。
   private func deliverPendingDoc() {
     guard let doc = pendingDoc, let channel = filesChannel, !docDelivered else { return }
     docDelivered = true
+    let generation = pendingDocGeneration
     channel.invokeMethod("openDocument", arguments: doc)
+    // invokeMethod 只是入队，不保证 Dart 已注册 handler；Dart 首帧会 getIncomingFile 兜底。
+    // 宽限到期仍未消费（未收到 clearIncomingFile）就释放暂存字节，避免大文件常驻内存。
+    DispatchQueue.main.asyncAfter(deadline: .now() + DshNativeBridge.pendingDocReleaseDelay) { [weak self] in
+      guard let self else { return }
+      guard self.pendingDocGeneration == generation, self.docDelivered else { return }
+      self.pendingDoc = nil
+    }
   }
 
   // MARK: - Helpers
 
-  /// 读取外部文档字节：沙盒内文件直接读；iCloud/其他 App 的 security-scoped URL 先取访问权限。
-  private func readData(from url: URL) throws -> Data {
+  /// 读取外部文档字节（线程安全，可在后台队列调用）。
+  /// 返回 nil 表示超过大小上限（不读内容）。
+  private static func readDocument(at url: URL, maxBytes: Int) throws -> Data? {
+    // iCloud / 其他 App 的文件是 security-scoped URL，先取访问权限（读失败则放弃权限申请结果）。
     let scoped = url.startAccessingSecurityScopedResource()
     defer {
       if scoped { url.stopAccessingSecurityScopedResource() }
     }
-    return try Data(contentsOf: url)
+    // 先看元数据大小，能避免 iCloud 未下载的大文件触发整份下载/读取。
+    if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size > maxBytes {
+      return nil
+    }
+    let data = try Data(contentsOf: url, options: .mappedIfSafe)
+    return data.count > maxBytes ? nil : data
   }
 
   private func documentsDirectory() throws -> URL {
@@ -283,12 +360,21 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
   }
 
   private func presentShareSheet(for url: URL) {
-    guard let presenter = presentingViewController() else { return }
+    guard let presenter = presentingViewController(),
+          presenter.viewIfLoaded?.window != nil,
+          presenter.presentedViewController == nil
+    else {
+      return
+    }
     let activity = UIActivityViewController(activityItems: [url], applicationActivities: nil)
     if let popover = activity.popoverPresentationController {
       popover.sourceView = presenter.view
       popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
     }
     presenter.present(activity, animated: true)
+  }
+
+  private static func assertMainThread() {
+    assert(Thread.isMainThread, "DshNativeBridge 状态必须在主线程访问")
   }
 }

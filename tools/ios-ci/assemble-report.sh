@@ -14,17 +14,44 @@ ANDROID_JOB="${ANDROID_RESULT:-unknown}"
 step "assemble-report"
 
 # 1) 拷贝证据（ios/ 与 android/ 子目录分开，互不覆盖）
+# artifact 的布局可能是 <staging>/<name>/ 直接就是 ci-out 内容，也可能多套一层 ci-out/；
+# 这里用 status.txt 作为锚点自动探测证据根，探测失败时打印实际目录树并明确报错。
+evidence_root() {
+  name="$1"
+  root="$STAGING/$name"
+  if [ ! -d "$root" ]; then
+    echo "$root"
+    return 1
+  fi
+  if [ -f "$root/status.txt" ]; then
+    echo "$root"
+    return 0
+  fi
+  nested="$(find "$root" -maxdepth 3 -name status.txt -type f 2>/dev/null | head -1)"
+  if [ -n "$nested" ]; then
+    dirname "$nested"
+    return 0
+  fi
+  echo "$root"
+  return 1
+}
 rm -rf "$CI_OUT/ios" "$CI_OUT/android"
 mkdir -p "$CI_OUT/ios" "$CI_OUT/android"
-if [ -d "$STAGING/ios" ]; then
-  cp -R "$STAGING/ios"/. "$CI_OUT/ios"/ 2>/dev/null || log "⚠️ 复制 ios 证据失败"
+if IOS_SRC="$(evidence_root ios)"; then
+  log "ios 证据根: $IOS_SRC"
+  cp -R "$IOS_SRC"/. "$CI_OUT/ios"/ 2>/dev/null || log "⚠️ 复制 ios 证据失败"
 else
-  log "⚠️ 未找到 ios 证据目录: $STAGING/ios"
+  log "❌ 未找到 ios 证据根（缺 status.txt）: $IOS_SRC"
 fi
-if [ -d "$STAGING/android" ]; then
-  cp -R "$STAGING/android"/. "$CI_OUT/android"/ 2>/dev/null || log "⚠️ 复制 android 证据失败"
+if ANDROID_SRC="$(evidence_root android)"; then
+  log "android 证据根: $ANDROID_SRC"
+  cp -R "$ANDROID_SRC"/. "$CI_OUT/android"/ 2>/dev/null || log "⚠️ 复制 android 证据失败"
 else
-  log "⚠️ 未找到 android 证据目录: $STAGING/android"
+  log "⚠️ 未找到 android 证据根（缺 status.txt）: $ANDROID_SRC"
+fi
+if [ ! -f "$CI_OUT/ios/status.txt" ]; then
+  log "❌ 关键证据 ios/status.txt 缺失 —— artifact 布局不符？staging/ios 实际内容："
+  find "$STAGING/ios" -maxdepth 3 2>/dev/null | head -40 | tee -a "$BUILD_LOG" || true
 fi
 
 # 2) 结论：以 iOS 为准；Android 失败只记录（status.txt 必须在证据拷贝之后读）
@@ -125,6 +152,16 @@ allowed_list() {
     echo ""
     allowed_list "$CI_OUT/allowed-steps.txt"
   fi
+  INTEG_OUTCOME="$(sed -n 's/^integration-test=//p' "$CI_OUT/ios/steps.txt" 2>/dev/null | head -1)"
+  echo ""
+  echo "## 端到端冒烟（integration_test）"
+  echo ""
+  case "$INTEG_OUTCOME" in
+    success) echo "✅ **integration-test: success** —— 模拟器上真机形态端到端冒烟已跑通（不是允许失败放行）。" ;;
+    skipped) echo "⏭️ integration-test: skipped（前置步骤失败或未执行）。" ;;
+    "") echo "integration-test: 未记录（步骤未运行）。" ;;
+    *) echo "❌ **integration-test: $INTEG_OUTCOME** —— 当前在 ALLOW_FAIL_STEPS 里放行（不影响结论），但说明端到端冒烟没跑通，需人工确认。" ;;
+  esac
   echo ""
   echo "## 性能 / 冒烟证据（模拟器 debug 构建）"
   echo ""

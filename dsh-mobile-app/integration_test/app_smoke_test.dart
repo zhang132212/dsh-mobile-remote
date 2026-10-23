@@ -25,6 +25,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:dsh_mobile_app/api.dart' show api;
 import 'package:dsh_mobile_app/floating.dart';
 import 'package:dsh_mobile_app/main.dart' as app;
 import 'package:dsh_mobile_app/screens/settings_screen.dart';
@@ -39,10 +40,21 @@ void main() {
     // 内存 prefs：保证 App 每次都以「未配置连接」的冷启动态启动（连接页必现），
     // 且不会把测试写入的地址持久化到模拟器上影响后续运行。
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    // 全局单例（api / store）跨用例共享：先重置，避免未来追加第二个用例时
+    // 继承上一次的连接配置/SSE 连接（当前只有一个用例，属防御性重置）。
+    api
+      ..baseUrl = ''
+      ..token = ''
+      ..path = '/m'
+      ..baseUrls = <String>[]
+      ..pluginVersion = '';
+    app.store.disposeBridge();
     server = await _MockDshServer.start();
   });
 
   tearDown(() async {
+    // 停 SSE/重连定时器，避免清理阶段继续打 mock 服务。
+    app.store.disposeBridge();
     await server.close();
   });
 
@@ -65,6 +77,8 @@ void main() {
     await tester.enterText(find.byType(TextField).at(0), server.baseUrl);
     await tester.enterText(find.byType(TextField).at(1), 'smoke-token');
     await tester.ensureVisible(find.text('连接'));
+    // C：ensureVisible 只是滚动，坐标要等下一帧布局后才更新；不 pump 直接 tap 会点空。
+    await tester.pump();
     await tester.tap(find.text('连接'));
 
     // ── 3) 配置成功 → RootScreen 主界面（AppBar 左侧抽屉按钮）──
@@ -74,9 +88,24 @@ void main() {
 
     // ── 4) 抽屉 → 设置页，断言顶部卡片渲染、无异常 ──
     await tester.tap(find.byIcon(Icons.menu));
+    // A：抽屉有 ~246ms fling 滑入动画；动画中 text 已在树里但位置还在屏幕外，
+    //    tap 会静默落空（v2 CI 实测 offset(-136,249) outside bounds）。等足 600ms
+    //    再断言入口已在屏幕内（不用 pumpAndSettle：App 有常驻动画会一直等）。
+    await tester.pump(const Duration(milliseconds: 600));
     await _pumpUntil(tester, find.text('设置'), reason: '抽屉「设置」入口');
-    await tester.tap(find.text('设置').last);
-    await _pumpUntil(tester, find.text('重新配置连接'), reason: '设置页渲染');
+    final settingsEntry = find.text('设置').last;
+    final entryCenter = tester.getCenter(settingsEntry);
+    expect(entryCenter.dx, greaterThan(0),
+        reason: '抽屉「设置」项仍在屏幕外（x=$entryCenter.dx），点击会静默落空');
+    await tester.tap(settingsEntry);
+    await tester.pump(const Duration(milliseconds: 400)); // 等抽屉关闭动画
+
+    // B：设置页在 IndexedStack 中、列表懒加载——用「标题栏出现设置」判定更可靠。
+    await _pumpUntil(
+      tester,
+      find.descendant(of: find.byType(AppBar), matching: find.text('设置')),
+      reason: '设置页标题栏',
+    );
     expect(find.text('电脑地址'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
@@ -95,9 +124,11 @@ void main() {
       expect(tester.takeException(), isNull);
     }
 
-    // 收尾：停掉 SSE/重连定时器，避免测试清理阶段继续打 mock 服务；
-    // 再恢复 main() 改写的全局错误兜底（见测试开头说明）。
+    // 收尾（D）：停掉 SSE/重连定时器，避免清理阶段继续打 mock 服务。
+    // eventsRaw 现在每路独立 client，且已在其取消/完成/出错/超时路径 force close；
+    // 全局 api 的普通 HttpClient 与 App 同生命周期（生产一致，无公开 close 接口）。
     app.store.disposeBridge();
+    // 恢复 main() 改写的全局错误兜底（见测试开头说明）。
     ErrorWidget.builder = errorWidgetBuilderBeforeTest;
   });
 }

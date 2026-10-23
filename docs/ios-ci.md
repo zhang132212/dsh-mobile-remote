@@ -19,7 +19,7 @@
 | 模拟器构建 + 安装 + 启动 + 首帧渲染正常 | `flutter build ios --simulator --debug` + `sim-smoke.sh` | 是 |
 | 集成测试（App 冒烟） | `flutter test integration_test -d <模拟器 UDID>` | **暂不阻塞**（见 §5.3） |
 | Android 端没有被 iOS 改动带坏 | `flutter build apk --release`（ubuntu job） | 否（只记录） |
-| 证据归档 | `report` job 回传 ci-artifacts 分支 | 归档失败会判红（§6） |
+| 证据归档 | `report` job 回传 ci-artifacts 分支 | 否（回传失败只报警告，不影响结论，§6.5） |
 
 ---
 
@@ -46,7 +46,7 @@
 | 项 | 值 | 依据 / 备注 |
 |---|---|---|
 | iOS runner | `macos-15`（arm64） | GitHub runner 镜像；默认 Xcode 16.4 |
-| Android runner | `ubuntu-latest` | Android SDK 预装；用 setup-java 固定 JDK 17 |
+| Android runner | `ubuntu-latest` | Android SDK 预装；用 setup-java 固定 **JDK 21**（工程用 AGP 9.1.0 / Gradle 9.5.0，JDK 21 更稳） |
 | Xcode | 16.4（macos-15 默认） | Flutter 3.47.7 要求 **Xcode >= 15**、推荐 16（`flutter_tools/lib/src/macos/xcode.dart` 里 `xcodeRequiredVersion = 15`、`xcodeRecommendedVersion = 16`）。macos-15 同时提供 Xcode 26.x，可用 `xcode_app` 输入切换 |
 | Flutter | **3.47.7 stable（Dart 3.13.5）** | 与本地 SDK 一致；用 `subosito/flutter-action@v2` 安装（`cache: true`） |
 | 版本号定义处 | 工作流 `env.FLUTTER_VERSION` / `with.flutter-version` / 本文件 | 三处要一起改 |
@@ -71,10 +71,17 @@ report（ubuntu）  —— needs: [ios, android]：下载两边证据 -> summary
 构建模拟器版（debug, --simulator）-> 模拟器冒烟（boot/install/launch/首帧/截图/存活）-> 集成测试 ->
 收集产物 -> 汇总 `status.txt/summary.md` -> 上传 ios-evidence artifact。
 
-**android job**：Checkout -> 规范化脚本换行 -> JDK 17 -> 安装 Flutter -> 缓存 Gradle -> `flutter pub get` ->
+**android job**：Checkout -> 规范化脚本换行 -> JDK 21 -> 记录工具链版本 -> 安装 Flutter -> 缓存 Gradle -> `flutter pub get` ->
 `flutter build apk --release --no-pub` -> 收集 APK 证据 -> 上传 android-evidence artifact。
 仓库没有 `android/key.properties`，release 构建会回退 debug 签名（`android/app/build.gradle.kts` 里已处理），
 因此干净克隆也能构建；本 job 只验证"没被改坏"，不产出正式分发包。
+
+> 已知问题（v2 首跑实测，已修）：Android job 里 `flutter pub get` 会以 releaseMode=false 生成
+> `GeneratedPluginRegistrant.java`（含 dev 依赖 integration_test），而 `flutter build apk --release --no-pub`
+> 不会以 releaseMode=true 重新注入插件 → release 编译报 `package dev.flutter.plugins.integration_test does not exist`。
+> 修法（双保险）：① **build 不带 `--no-pub`**，让构建自己以 release 模式重新生成 registrant（过滤 dev 依赖）；
+> ② 构建前仍临时摘掉 integration_test dev 依赖（`lib/` 不允许 import dev 依赖，语义等价），构建后立即恢复。
+> 详见 workflow 的 build_apk 步骤。
 
 **report job**：Checkout -> 下载 ios-evidence/android-evidence -> `assemble-report.sh`（汇总 summary.md / run.json /
 status.txt / README.md）-> `publish-artifacts.sh`（孤儿提交 force push 到 ci-artifacts）-> 门禁
@@ -146,10 +153,10 @@ git archive FETCH_HEAD | tar -x -C ci-artifacts-out
 # 之后看 ci-artifacts-out/ios/build.log、smoke.png 等
 ```
 
-**兜底通道**：ios job 另有一个 %BT%兜底回传%BT% 步骤，会把 iOS 证据（< 8MB 的小文件，
-不含设备版 .app 归档）直推到 %BT%ci-artifacts-ios%BT% 分支。
-正常情况下用不到；若 %BT%report%BT% job 出问题（artifact 传递失败等），仍可从该分支拿到
-%BT%build.log%BT% / %BT%smoke.png%BT% 等关键证据。
+**兜底通道**：ios job 另有一个 `兜底回传` 步骤，会把 iOS 证据（< 8MB 的小文件，
+显式排除 `*.zip` 归档，避免设备版 .app 重复推送）直推到 `ci-artifacts-ios` 分支。
+正常情况下用不到；若 `report` job 出问题（artifact 传递失败等），仍可从该分支拿到
+`build.log` / `smoke.png` 等关键证据。
 
 > 若只想看某个文本文件，也可以直接读 raw：
 > `https://raw.githubusercontent.com/<owner>/<repo>/ci-artifacts/summary.md`
@@ -168,12 +175,21 @@ curl -s "https://api.github.com/repos/<owner>/<repo>/actions/runs/<run_id>/jobs"
 
 > 日志下载（`/actions/runs/<id>/logs`）和 artifact 下载接口**需要鉴权**，
 > 本项目的设计刻意不依赖它们（见 §6.4）。
+> 由于并发策略会取消旧轮，**取证据时以 `run.json` 里的 `run_id` 为准**，不要假设分支内容就是页面上最近一轮。
 
 ### 6.4 网络与代理说明（本机环境）
 
 - 本机（Windows）访问 api.github.com / raw.githubusercontent.com 经 HTTP 代理不稳定；
   实测可用方式：`ssh ssh1 "curl -s https://api.github.com/..."`（ssh1 有直连外网）。
 - CI runner 上无此问题（runner 直连 GitHub）。
+
+### 6.5 门禁与"证据回传"是解耦的
+
+- workflow 的结论只由 **iOS 证据结论（status.txt）+ iOS job 结果**决定；
+- **证据回传失败不会让整轮变红**，只在 gate 步骤打 `::warning::` 并在 Step Summary 里提示。
+  回传到底成没成功，请以 `ci-artifacts` 分支是否更新（`git ls-remote origin ci-artifacts`）为准。
+- 理由：回传依赖 token 权限 / 网络 / 体积限制，属于"基础设施问题"；把它和"代码/构建是否 OK"
+  绑在一起会出现"全绿却红、且 failed-steps 为空"的误导现象。
 
 ---
 
@@ -288,7 +304,7 @@ bash tools/ios-ci/verdict.sh
 | 冒烟 install 失败 | App 不是 simulator 版；设备/运行时不可用 | 冒烟只用 `--simulator` 产物；看 `sim-devices.txt` |
 | 冒烟"进程不在 launchctl 列表" | 启动即崩溃（Swift 通道注册/插件缺失/SDK 版本） | 看 `sim-log-tail.txt`、`launchctl-list.txt`、`*.ips`、`smoke-fail.png`；本地按 §7.3 复现 |
 | integration-test 失败 | 测试环境波动 / UI 断言与当前页面不一致 | 当前在 `ALLOW_FAIL_STEPS` 里放行；连续稳定后改为阻塞 |
-| 回传 ci-artifacts 失败 | 仓库 Settings -> Actions -> General -> Workflow permissions 不是 **Read and write**；或 token 权限被限制 | 让 Lead 改仓库设置；本地临时可从 Actions 页面看日志 |
+| 回传 ci-artifacts 失败（gate 只 warning，不判红） | 仓库 Settings -> Actions -> General -> Workflow permissions 不是 **Read and write**；或 token 权限被限制 | 让 Lead 改仓库设置；临时可用 `ci-artifacts-ios` 兜底分支或 Actions 页面日志 |
 | report job 下载 evidence 失败 | 前一个 job 的 upload-artifact 失败/名字不匹配 | 看 report job 日志；artifact 名固定为 `ios-evidence` / `android-evidence` |
 | 运行长时间 pending | macOS runner 排队（public 仓库免费额度） | 等；不要重复 push（会取消排队中的旧 run） |
 | 运行超过 100 分钟被取消 | job timeout（ios 100 / android 45 / report 20 分钟） | 看卡在哪一步；必要时调高 timeout 或拆 job |
@@ -337,7 +353,7 @@ bash tools/ios-ci/verdict.sh
 | 结果 | 实测数据 |
 |---|---|
 | flutter analyze | ✅ 约 19s |
-| flutter test（全量） | ❌ 304 passed / 12 skipped / **3 failed**（全部是 %BT%test/sse_cancel_window_test.dart%BT% 的"残留连接"断言；同一文件在更早一轮 macOS 上是绿的 → 时序 flaky，T3 改为轮询等待中） |
+| flutter test（全量） | ❌ 304 passed / 12 skipped / **3 failed**（全部是 `test/sse_cancel_window_test.dart` 的"残留连接"断言；同一文件在更早一轮 macOS 上是绿的 → 时序 flaky，T3 改为轮询等待中） |
 | build-device（release, no-codesign） | ✅ **2m39s**，Runner.app **23MB**，bundle id **com.dsh.remote**，3.2.10 (33)，arm64；Frameworks = App / Flutter / **objective_c**（native assets 正常）；插件 bundle 齐全 |
 | build-sim（debug, --simulator） | ✅ 约 2m26s，Runner.app **183MB**（universal x86_64+arm64） |
 | sim-smoke | ✅ 首次 boot 1m47s → install → launch **PID 22022** → 12s 后进程存活 → 截图 **62,924 bytes**（连接页完整渲染：标题/扫码连接/电脑地址/访问口令/连接，中文字体正常） |
@@ -346,7 +362,10 @@ bash tools/ios-ci/verdict.sh
 
 结论：**Swift 编译、SPM（无 Podfile）、native assets（objective_c）、模拟器安装/启动/渲染全部通过**；
 唯一问题是 3 个对时序敏感的 SSE 连接释放测试用例（非平台性破坏）。
-v2（三 job + integration_test + 性能证据 + 兜底回传分支）为当前版本，首轮完整跑通后更新本节。
+v2（三 job + integration_test + 性能证据 + 兜底回传分支）为当前版本；首轮完整跑通后更新本节。
+- 交叉审查修复（v2 首批）：门禁与证据回传解绑（F1）、integration_test UDID 读取修正并删除 name 兜底（F2）、
+  artifact 布局自动探测 + 显式断言（F4）、iOS 工程检查改为诚实硬门禁（F5）、Android 改 JDK 21 并记录工具链版本（F6）、
+  兜底分支排除 zip（F7）、发布脚本支持带空格文件名（F8）、Impeller 日志只取一次（F9）。
 - 待办：
   - integration_test 连续稳定后移出 `ALLOW_FAIL_STEPS` 转为阻塞；
   - 视需要给设备版/模拟器版构建加 SPM 缓存（当前设备版约 2-3 分钟，可接受）；

@@ -39,7 +39,9 @@ final Api api = Api();
 typedef DirListing = ({List<String> dirs, List<String> files, String? sep});
 
 class Api {
-  Api({http.Client? client}) : _client = client ?? http.Client();
+  Api({http.Client? client, http.Client? sseClient})
+      : _client = client ?? http.Client(),
+        _injectedSseClient = sseClient;
 
   String baseUrl = '';
   String token = '';
@@ -63,9 +65,13 @@ class Api {
   static const _kPluginVer = 'dsh_mr_plugin_ver';
   static const _maxUrls = 8;
 
-  /// 共享 HTTP 客户端：SSE 重连复用同一连接池，避免每次 new Client 泄漏
-  /// socket/定时器导致内存耗尽闪退。
+  /// 普通 HTTP 请求客户端（bootstrap/sessions/... 共用连接池）。
+  /// **SSE 不再复用它**：见 [eventsRaw] 的独立 client 说明。
   final http.Client _client;
+
+  /// SSE 专用客户端（测试可注入 MockClient）；null = 每次 [eventsRaw] 新建独立 client，
+  /// 在取消/完成/出错等所有终止路径 force close（避免 Darwin 上残留半开 socket）。
+  final http.Client? _injectedSseClient;
 
   /// 地址归一：只保留 scheme://host[:port]（路径剥掉）——挂载路径由 [_pathOf] 单独解析。
   static String _normBase(String s) {
@@ -912,10 +918,26 @@ class Api {
     // 累积到服务端 maxConnections 后手机直接 503 连不上（症状：必须把 App 划掉重开）。
     // 显式标志位补上这一位。
     var cancelled = false;
+    // iOS 移植 / cross-review（Darwin 真残留）：SSE **每路独立 client**。
+    // 共享 client 时取消订阅/重连不会真正销毁底层 socket（macOS CI 实测 15s 后
+    // active=1）；独立 client 的 close() 对 IOClient 是 force close，能立即释放句柄。
+    final sseClient = _injectedSseClient ?? http.Client();
+    var sseClientClosed = false;
+    void closeSseClient() {
+      if (sseClientClosed) return;
+      sseClientClosed = true;
+      try {
+        sseClient.close();
+      } catch (_) {
+        // 关闭失败不影响重连（下一路会用新 client）
+      }
+    }
+
     final controller = StreamController<Map<String, dynamic>>(
       onCancel: () {
         cancelled = true;
         bodySub?.cancel();
+        closeSseClient();
       },
     );
     final req = http.Request('GET', _uri('/api/events'));
@@ -925,20 +947,23 @@ class Api {
     // 8 秒足够（正常服务器毫秒级回响应），失败越快轮换越快。
     final timeoutWatchdog = Timer(const Duration(seconds: 8), () {
       timedOut = true;
+      closeSseClient();
       if (!controller.isClosed) {
         controller.addError(ApiException('SSE 连接超时'));
         controller.close();
       }
     });
-    _client
+    sseClient
         .send(req)
         .then((res) {
           if (timedOut || cancelled || controller.isClosed) {
             // 晚到的响应/已取消：立即消费并释放，不留半开 socket
             res.stream.listen((_) {}).cancel();
+            closeSseClient();
             return;
           }
           if (res.statusCode != 200) {
+            closeSseClient();
             if (!controller.isClosed) {
               controller.addError(ApiException('SSE HTTP ${res.statusCode}'));
               controller.close();
@@ -974,15 +999,18 @@ class Api {
                 ..write(s);
             },
             onDone: () {
+              closeSseClient();
               if (!controller.isClosed) controller.close();
             },
             onError: (e) {
+              closeSseClient();
               if (!controller.isClosed) controller.addError(e);
             },
             cancelOnError: true,
           );
         })
         .catchError((e) {
+          closeSseClient();
           if (!controller.isClosed) {
             controller.addError(e);
             controller.close();

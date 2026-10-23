@@ -201,8 +201,11 @@ SIM_KB="$(du -sk "$APP_PATH" 2>/dev/null | cut -f1)"
 SIM_BYTES="$((${SIM_KB:-0} * 1024))"
 SIM_HUMAN="$(du -sh "$APP_PATH" 2>/dev/null | cut -f1)"
 BIN_BYTES="$(stat -f%z "$APP_PATH/Runner" 2>/dev/null || echo '?')"
-IMPELLER_HITS="$(xcrun simctl spawn "$UDID" log show --last 2m --style compact 2>/dev/null | grep -ci 'impeller' || echo 0)"
-IMPELLER_SNIPPET="$(xcrun simctl spawn "$UDID" log show --last 2m --style compact 2>/dev/null | grep -i 'impeller' | head -1 || true)"
+IMPELLER_LOG="$(xcrun simctl spawn "$UDID" log show --last 2m --style compact 2>/dev/null | grep -i 'impeller' || true)"
+printf '%s\n' "$IMPELLER_LOG" > "$CI_OUT/impeller.log"
+IMPELLER_HITS="$(printf '%s\n' "$IMPELLER_LOG" | grep -c . || true)"
+[ -n "${IMPELLER_HITS:-}" ] || IMPELLER_HITS=0
+IMPELLER_SNIPPET="$(printf '%s\n' "$IMPELLER_LOG" | head -1)"
 
 {
   echo "udid=$UDID"
