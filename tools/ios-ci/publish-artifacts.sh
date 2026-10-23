@@ -20,10 +20,15 @@ rm -rf "$WORK"
 mkdir -p "$WORK"
 
 SKIP_GLOBS="${ARTIFACT_SKIP_GLOBS:-}"   # 空格分隔的 glob，例如 "*.zip *.ips"
-TOTAL="$(find "$CI_OUT" -type f 2>/dev/null | wc -l | tr -d ' ')"
-# 注意：macOS 自带 bash 3.2 **不支持** read -d（bash 4+），这里用按行读；
-# 文件名里的空格没问题（IFS= read 读整行），仅理论上不支持含换行的文件名。
-find "$CI_OUT" -type f -print 2>/dev/null | while IFS= read -r src; do
+FILELIST="${RUNNER_TEMP:-/tmp}/ci-artifacts-filelist.txt"
+find "$CI_OUT" -type f -print 2>/dev/null > "$FILELIST" || true
+TOTAL="$(wc -l < "$FILELIST" | tr -d ' ')"
+log "扫描到 $TOTAL 个文件，开始筛选/复制（work=$WORK，skip_globs=[$SKIP_GLOBS]，max=${MAX_BYTES}B）"
+# 注意：① macOS 自带 bash 3.2 不支持 read -d（bash 4+），用按行读；
+#       ② 不用 `find | while` 管道（子 shell + pipefail 在 macOS 3.2 上曾静默中断，v4 兜底步骤踩过），
+#          改为临时清单 + 重定向读。
+while IFS= read -r src; do
+  [ -n "$src" ] || continue
   rel="${src#$CI_OUT/}"
   skip=""
   if [ -n "$SKIP_GLOBS" ]; then
@@ -47,7 +52,8 @@ find "$CI_OUT" -type f -print 2>/dev/null | while IFS= read -r src; do
   fi
   mkdir -p "$WORK/$(dirname "$rel")"
   cp "$src" "$WORK/$rel" || log "⚠️ 复制失败: $rel"
-done
+done < "$FILELIST"
+rm -f "$FILELIST"
 COPIED="$(find "$WORK" -type f 2>/dev/null | wc -l | tr -d ' ')"
 log "待推送文件: $COPIED 个（总计 $TOTAL，跳过 $((TOTAL - COPIED)) 个）"
 

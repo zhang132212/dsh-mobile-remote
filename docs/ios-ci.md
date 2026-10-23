@@ -158,6 +158,11 @@ git archive FETCH_HEAD | tar -x -C ci-artifacts-out
 正常情况下用不到；若 `report` job 出问题（artifact 传递失败等），仍可从该分支拿到
 `build.log` / `smoke.png` 等关键证据。
 
+> ⚠️ **已知限制（v3/v4 实测）**：兜底步骤在 macOS runner 上曾出现「step 报 success 但分支未更新」
+>（v4 的 `ci-artifacts-ios` 停在旧提交）。已定位到发布脚本早期用 bash4 的 `read -d`（已修），
+> 并进一步把 `find | while` 管道改成临时清单逐行读以规避 macOS bash 3.2 的静默中断；
+> 该修复尚未在新的 CI 轮次里复验。**取证据仍以 `ci-artifacts` 主分支为准**，兜底分支仅作 best-effort。
+
 > 若只想看某个文本文件，也可以直接读 raw：
 > `https://raw.githubusercontent.com/<owner>/<repo>/ci-artifacts/summary.md`
 > （raw 的 branch 路径有 CDN 缓存，约 5 分钟；要点最新的可用 commit sha 路径。）
@@ -377,17 +382,36 @@ bash tools/ios-ci/verdict.sh
 | flutter test | ❌ 仍 3 条 `sse_cancel_window`：`active=1 idle=0 closing=0 responses=1`（重建用例 `active=3`）。已确认客户端 `IOClient.close()` 内部是 `HttpClient.close(force:true)`（package:http 1.6.0 源码），所以更像 FakeSse 服务端没清理/度量口径问题，T3 修测试度量或平台化处理中 |
 | report / 回传 | ✅ ci-artifacts 已更新（run.json status=failure 仅因 test）；⚠️ 兜底分支 ci-artifacts-ios 本轮**没更新**——原因是发布脚本用了 bash4 的 `read -d`，macOS 3.2 不支持 → 已改为 `find -print | read -r`，并把兜底步骤移到 upload 之前，确保失败日志也进证据 |
 
-### 12.3 交叉审查修复（v2 首批，v3 已生效）
+### 12.3 v4 最终验证（2026-10-23，run 39994529886 / commit fedee4e）——**全绿**
+
+| 项 | 结果 |
+|---|---|
+| iOS job | ✅ success（12 个记录步骤全 success） |
+| flutter test | ✅ **全量通过**（SSE 三条改 raw ServerSocket 判据后：`responses=1 closed=1` / `1/1` / `3/3`） |
+| **integration-test** | ✅ **success**（Xcode build 96.6s + 用例 19s，`All tests passed!`） |
+| build-device | ✅ 24MB（24,670,208 bytes） |
+| build-sim | ✅ 183MB（191,692,800 bytes） |
+| sim-smoke | ✅ PID 24744，launch 调用 5587ms，**首帧 13283ms**，Impeller Metal 日志命中 1，截图 63,592 bytes |
+| Android | ✅ release APK **77MB**（80,378,542 bytes） |
+| report / ci-artifacts | ✅ 已更新（sha 7caec8a），`run.json status=success` |
+| ATS 报告措辞 | ✅ 「ATS: NSAllowsArbitraryLoads=True；无 NSAllowsLocalNetworking —— 按设计」 |
+| 兜底分支 ci-artifacts-ios | ⚠️ v4 仍未更新（step 报 success 但没 push；已知限制，见 §6.2）；主通道正常 |
+
+> 这是 iOS 移植的**最终交付证据轮**：analyze / 全量 test / 设备版 release 构建 / 模拟器 debug 构建 /
+> 模拟器安装启动首帧截图 / 端到端集成测试 / Android release 回归，全部通过。
+
+### 12.4 交叉审查修复（v2 首批，v3 已生效）
 
 - 门禁与证据回传解绑（F1）、integration_test UDID 读取修正并删除 name 兜底（F2）、
   artifact 布局自动探测 + 显式断言（F4）、iOS 工程检查改为诚实硬门禁（F5）、Android 改 JDK 21 并记录工具链版本（F6）、
   兜底分支排除 zip（F7）、发布脚本支持带空格文件名（F8）、Impeller 日志只取一次（F9）。
 - v4 补充：Android build **不带 `--no-pub`**（release 模式重新注入，过滤 dev 依赖）+ ATS 检查措辞（只保留 `NSAllowsArbitraryLoads`，无 `NSAllowsLocalNetworking` 属设计）。
 
-### 12.4 待办
+### 12.5 待办与已知限制
 
-- SSE 三条用例：等 T3 选定「服务端度量修正 / 平台条件处理」方案后转绿；
-- test 全绿 + integration-test 稳定 2 轮后，把 integration-test 移出 `ALLOW_FAIL_STEPS` 转为阻塞；
-- 兜底分支 ci-artifacts-ios 在下一轮确认恢复更新；
+- integration-test 已在 v3、v4 连续两轮 success：下次维护时可把 workflow 里 `ios.verdict` 的
+  `ALLOW_FAIL_STEPS` 改为空字符串，把它转为硬门禁（当前仍放行，但 summary 会明确写 success/failure）；
+- ⚠️ 兜底分支 `ci-artifacts-ios`：v4 仍出现「step success 但分支未更新」（macOS bash 3.2 上静默中断，
+  已改用临时清单逐行读修复，待未来轮次复验）；**主通道 `ci-artifacts` 已验证可靠**；
 - 视需要给设备版/模拟器版构建加 SPM 缓存（当前设备版约 2-3 分钟，可接受）；
 - 如需在 macOS 上维护 golden 基准，再引入按平台命名的 golden（`goldens/<platform>/`），当前不需要。
