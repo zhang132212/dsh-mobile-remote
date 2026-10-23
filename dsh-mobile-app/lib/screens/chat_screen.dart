@@ -13,6 +13,7 @@ import '../dsh_kit.dart';
 import '../logger.dart';
 import '../l10n.dart';
 import '../models.dart';
+import '../platform_support.dart';
 import '../store.dart';
 import '../timeline.dart';
 import '../theme.dart';
@@ -2688,8 +2689,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   /// v3.1.2（csborbbnc 反馈）：上传文件——系统选择器 → 写入电脑端会话工作目录。
-  static const MethodChannel _filesChannel = MethodChannel('dsh/files');
-
+  /// 通道细节（Android/iOS 差异、异常→可读提示）统一收在 FileBridge。
   Future<void> _uploadFile() async {
     final sid = _mySessionId ?? widget.store.sessionId;
     if (sid == null) {
@@ -2697,7 +2697,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     try {
-      final picked = await _filesChannel.invokeMapMethod<String, dynamic>('pickFile');
+      final picked = await FileBridge.pickFile();
       if (picked == null) return; // 取消
       final name = picked['name'] as String? ?? 'file';
       final bytes = picked['bytes'] as Uint8List?;
@@ -2723,10 +2723,10 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final bytes = await _api.downloadFile(path);
       final name = path.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).lastOrNull ?? 'file';
-      final saved = await _filesChannel
-          .invokeMethod<String>('saveToDownloads', {'name': name, 'bytes': bytes});
+      final saved = await FileBridge.saveToDownloads(name: name, bytes: bytes);
       if (mounted) {
-        showToast(context, '${L10n.t('已保存到手机：', 'Saved on phone: ')}${saved ?? name}');
+        // iOS：落在 App 文稿（「文件」App / 分享面板可见），文案由 FileBridge 按平台给。
+        showToast(context, FileBridge.savedMessage(saved));
       }
     } catch (e) {
       if (mounted) showToast(context, '${L10n.t('下载失败：', 'Download failed: ')}$e');

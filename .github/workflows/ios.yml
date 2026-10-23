@@ -1,0 +1,223 @@
+# iOS 移植 CI：macOS 构建 + 模拟器冒烟 + 证据回传
+#
+# 触发：push 到 ios/port；或手动 workflow_dispatch。
+# 产物：用 GITHUB_TOKEN 强制推送到 ci-artifacts 分支（孤儿提交，只放产物，不碰业务分支）。
+#       失败也会回传（if: always()），便于没有 GitHub API token 的环境用 git 取日志/截图/失败清单。
+# 说明：docs/ios-ci.md
+name: iOS CI
+
+on:
+  push:
+    branches: [ios/port]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "macOS runner 标签（默认 macos-15；备选 macos-14 / macos-26）"
+        type: string
+        default: macos-15
+      xcode_app:
+        description: "可选：Xcode.app 绝对路径；留空用 runner 默认 Xcode"
+        type: string
+        default: ""
+      allow_test_failures:
+        description: "排障用：flutter test 失败也判本 job 成功（默认 false）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write          # 回传 ci-artifacts 分支需要
+
+concurrency:
+  group: ios-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.47.7"     # 与本地 SDK 一致（stable / Dart 3.13.5）
+  APP_DIR: "dsh-mobile-app"
+  CI_OUT: ${{ github.workspace }}/ci-out
+  BUILD_LOG: ${{ github.workspace }}/ci-out/build.log
+  ARTIFACTS_BRANCH: "ci-artifacts"
+
+jobs:
+  ios:
+    name: macOS build + simulator smoke
+    runs-on: ${{ github.event.inputs.runner || 'macos-15' }}
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Windows 侧 core.autocrlf=true，脚本可能以 CRLF 提交；这里统一成 LF（幂等）。
+      - name: 规范化 CI 脚本换行
+        if: always() && steps.checkout.outcome == 'success'
+        run: |
+          set -uo pipefail
+          mkdir -p "$CI_OUT"
+          for f in tools/ios-ci/*.sh; do
+            [ -f "$f" ] || continue
+            sed -i '' 's/\r$//' "$f" 2>/dev/null || sed -i 's/\r$//' "$f" || true
+          done
+          chmod +x tools/ios-ci/*.sh 2>/dev/null || true
+          echo "CI 脚本换行已规范化（幂等）" > "$BUILD_LOG"
+
+      - name: 环境信息（macOS / Xcode / 模拟器 / CocoaPods）
+        id: env
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          XCODE_APP: ${{ github.event.inputs.xcode_app }}
+        run: bash tools/ios-ci/check-env.sh
+
+      - name: iOS 工程配置检查（信息性，不阻塞）
+        id: ios_project
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        run: bash tools/ios-ci/check-ios-project.sh
+
+      - name: 安装 Flutter 3.47.7（subosito/flutter-action，带缓存）
+        id: install
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.7"
+          channel: stable
+          cache: true
+
+      - name: 依赖解析 flutter pub get
+        id: pub
+        if: always() && steps.install.outcome == 'success'
+        continue-on-error: true
+        working-directory: dsh-mobile-app
+        run: |
+          set -uo pipefail
+          printf '\n===== STEP pub-get  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
+          if grep -q 'pub.flutter-io.cn' pubspec.lock 2>/dev/null; then
+            sed -i '' 's#https://pub.flutter-io.cn#https://pub.dev#g' pubspec.lock
+            echo "pubspec.lock: hosted 源由 pub.flutter-io.cn 改写为 pub.dev（仅 CI 工作区，不提交）" | tee -a "$BUILD_LOG"
+          fi
+          flutter --version 2>&1 | tee -a "$BUILD_LOG"
+          flutter pub get 2>&1 | tee -a "$BUILD_LOG"
+
+      - name: 静态分析 flutter analyze
+        id: analyze
+        if: always() && steps.pub.outcome == 'success'
+        continue-on-error: true
+        working-directory: dsh-mobile-app
+        run: |
+          set -uo pipefail
+          printf '\n===== STEP analyze  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
+          flutter analyze --no-pub 2>&1 | tee -a "$BUILD_LOG"
+
+      - name: 测试 flutter test（全量测试文件）
+        id: test
+        if: always() && steps.pub.outcome == 'success'
+        continue-on-error: true
+        working-directory: dsh-mobile-app
+        run: |
+          set -uo pipefail
+          printf '\n===== STEP test  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
+          rm -rf test/failures   # 仓库提交过历史 golden 失败图，先清掉，确保 failures 只含本次产生的
+          flutter test --no-pub --reporter expanded 2>&1 | tee -a "$BUILD_LOG"
+
+      - name: 构建设备版 flutter build ios --release --no-codesign
+        id: build_device
+        if: always() && steps.pub.outcome == 'success'
+        continue-on-error: true
+        working-directory: dsh-mobile-app
+        run: |
+          set -uo pipefail
+          printf '\n===== STEP build-device  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
+          flutter build ios --release --no-codesign 2>&1 | tee -a "$BUILD_LOG"
+
+      - name: 构建模拟器版 flutter build ios --simulator --debug
+        id: build_sim
+        if: always() && steps.pub.outcome == 'success'
+        continue-on-error: true
+        working-directory: dsh-mobile-app
+        run: |
+          set -uo pipefail
+          printf '\n===== STEP build-sim  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
+          # 设备版 Runner.app 不能装进模拟器，冒烟必须用 iphonesimulator 产物
+          flutter build ios --simulator --debug 2>&1 | tee -a "$BUILD_LOG"
+
+      - name: iOS Simulator 冒烟（启动模拟器 / 安装 / 启动 App / 截图）
+        id: smoke
+        if: always() && steps.build_sim.outcome == 'success'
+        continue-on-error: true
+        env:
+          SMOKE_WAIT_SEC: "12"
+        run: bash tools/ios-ci/sim-smoke.sh
+
+      - name: 收集产物（清单 / 日志 / 截图 / golden 失败图）
+        id: collect
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        run: bash tools/ios-ci/collect-artifacts.sh
+
+      - name: 汇总结果与失败清单（写 summary.md / status.txt）
+        id: verdict
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        env:
+          OUT_CHECKOUT: ${{ steps.checkout.outcome }}
+          OUT_ENV: ${{ steps.env.outcome }}
+          OUT_IOS_PROJECT: ${{ steps.ios_project.outcome }}
+          OUT_INSTALL: ${{ steps.install.outcome }}
+          OUT_PUB: ${{ steps.pub.outcome }}
+          OUT_ANALYZE: ${{ steps.analyze.outcome }}
+          OUT_TEST: ${{ steps.test.outcome }}
+          OUT_BUILD_DEVICE: ${{ steps.build_device.outcome }}
+          OUT_BUILD_SIM: ${{ steps.build_sim.outcome }}
+          OUT_SMOKE: ${{ steps.smoke.outcome }}
+          OUT_COLLECT: ${{ steps.collect.outcome }}
+          ALLOW_TEST_FAIL: ${{ github.event.inputs.allow_test_failures || 'false' }}
+        run: bash tools/ios-ci/verdict.sh
+
+      - name: 回传产物到 ci-artifacts 分支
+        id: publish
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash tools/ios-ci/publish-artifacts.sh
+
+      - name: 上传运行产物（Actions artifact；下载需要 token，主通道是 ci-artifacts 分支）
+        id: upload
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-out/build.log
+            ci-out/summary.md
+            ci-out/run.json
+            ci-out/smoke.png
+            ci-out/artifact-manifest.txt
+            ci-out/test-failures.txt
+            ci-out/env.txt
+            ci-out/sim-devices.txt
+            ci-out/ios-project-report.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: 结果门禁（红 / 绿）
+        id: gate
+        if: always()
+        env:
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+        run: |
+          set -uo pipefail
+          status="$(cat "$CI_OUT/status.txt" 2>/dev/null || echo failure)"
+          echo "流水线结论: $status"
+          if [ "$status" != "success" ]; then
+            echo "失败 / 未完成步骤："
+            cat "$CI_OUT/failed-steps.txt" 2>/dev/null || echo "(无法读取 failed-steps.txt)"
+            exit 1
+          fi
+          if [ "${PUBLISH_OUTCOME:-}" != "success" ]; then
+            echo "⚠️ 产物回传（ci-artifacts 分支）未成功，本次证据需从 Actions 页面或人工排查读取。"
+            exit 1
+          fi
+          echo "✅ 全部通过"

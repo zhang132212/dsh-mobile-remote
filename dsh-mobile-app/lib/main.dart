@@ -12,6 +12,7 @@ import 'floating.dart';
 import 'dsh_kit.dart';
 import 'theme.dart';
 import 'logger.dart';
+import 'platform_support.dart';
 import 'scan_screen.dart';
 import 'toast.dart';
 import 'update/update_ui.dart';
@@ -52,8 +53,11 @@ void main() async {
   };
   await api.load();
   await store.loadPrefs();
-  // v2.7.1：启动即把余额预警配置同步给悬浮球（可能已在后台运行，判定以 App 端设置为准）
-  unawaited(Floating.setBalanceAlert(store.balanceAlert, store.balanceThreshold));
+  // v2.7.1：启动即把余额预警配置同步给悬浮球（可能已在后台运行，判定以 App 端设置为准）。
+  // iOS 无系统悬浮球：Floating 内部已 no-op，这里显式跳过，避免无意义的通道调用。
+  if (Floating.isSupported) {
+    unawaited(Floating.setBalanceAlert(store.balanceAlert, store.balanceThreshold));
+  }
   // v2.7.2：上次开过悬浮球 → 自动恢复服务（清理后台/重启 App 后无需手动重开）
   unawaited(store.restoreFloating());
   runApp(const DshApp());
@@ -79,30 +83,11 @@ class _DshAppState extends State<DshApp> {
     store.addListener(_onStore);
     // 新增未读通知 → 全局顶部横幅
     store.onNewNotifications = _onNewNotifications;
-    // 悬浮球迷你面板动作（原生 → Flutter）：打开会话 / 去充值
-    const MethodChannel('dsh/floating').setMethodCallHandler((call) async {
-      final nav = rootNavigatorKey.currentState;
-      if (nav == null) return null;
-      switch (call.method) {
-        case 'openSessionRequested':
-          final id = call.arguments as String?;
-          if (id == null || id.isEmpty) break;
-          await _handleFloatingAction('session:$id');
-          break;
-        case 'openChargeRequested':
-          await _handleFloatingAction('charge');
-          break;
-        case 'openNotifsRequested':
-          // 打开通知页（与抽屉入口同款：先切到首页再推通知页）
-          await _handleFloatingAction('notifs');
-          break;
-        case 'openUsageRequested':
-          // 悬浮球面板「用量与额度」区块 → App 用量页
-          await _handleFloatingAction('usage');
-          break;
-      }
-      return null;
-    });
+    // 悬浮球迷你面板动作（原生 → Flutter）：打开会话 / 去充值。
+    // iOS：不支持系统悬浮球、dsh/floating 通道不存在——不注册 handler（动作调用也已全部 no-op）。
+    if (Floating.isSupported) {
+      const MethodChannel('dsh/floating').setMethodCallHandler(_onFloatingCall);
+    }
     // v2.7.2 review：冷启动面板动作兜底——Dart handler 注册晚于原生 deliver，
     // 首帧后主动拉取原生暂存的动作（可能已被 handler 消费，幂等）
     WidgetsBinding.instance.addPostFrameCallback((_) => _consumePendingFloatingAction());
@@ -128,6 +113,31 @@ class _DshAppState extends State<DshApp> {
     });
   }
 
+  /// 悬浮球迷你面板动作（热启动路径）：原生 → Flutter，打开会话 / 去充值 / 通知页 / 用量页。
+  Future<dynamic> _onFloatingCall(MethodCall call) async {
+    final nav = rootNavigatorKey.currentState;
+    if (nav == null) return null;
+    switch (call.method) {
+      case 'openSessionRequested':
+        final id = call.arguments as String?;
+        if (id == null || id.isEmpty) break;
+        await _handleFloatingAction('session:$id');
+        break;
+      case 'openChargeRequested':
+        await _handleFloatingAction('charge');
+        break;
+      case 'openNotifsRequested':
+        // 打开通知页（与抽屉入口同款：先切到首页再推通知页）
+        await _handleFloatingAction('notifs');
+        break;
+      case 'openUsageRequested':
+        // 悬浮球面板「用量与额度」区块 → App 用量页
+        await _handleFloatingAction('usage');
+        break;
+    }
+    return null;
+  }
+
   /// 本轮已处理的文档指纹（避免「事件推送」与「主动拉取」双路径重复弹同一份）。
   String? _docSeenKey;
   DateTime _docSeenAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -146,14 +156,14 @@ class _DshAppState extends State<DshApp> {
   /// 冷启动兜底：原生已暂存但事件早于 handler 注册时，首帧后主动取一次。
   Future<void> _pullPendingDoc() async {
     try {
-      const ch = MethodChannel('dsh/files');
-      final data = await ch.invokeMethod<Map<Object?, Object?>>('getIncomingFile');
+      final data = await FileBridge.getIncomingFile();
       if (data == null) return;
       AppLog.instance.log('[doc] 首帧拉取到原生暂存文档: ${data['name']} '
           'bytes=${(data['bytes'] as List?)?.length ?? 0} err=${data['error']}');
       await _openIncomingDoc(data);
     } catch (e) {
-      // 原生未实现该通道（旧版本 APK / 桌面端）时静默忽略
+      // 原生未实现该通道（旧版本 App / 桌面端）时静默忽略——FileBridge 已把异常
+      // 转成可读文案，这里只记日志，不打扰用户（首帧拉取属于兜底路径）。
       AppLog.instance.log('[doc] 拉取原生暂存文档失败: $e');
     }
   }
@@ -162,7 +172,6 @@ class _DshAppState extends State<DshApp> {
   Future<void> _openIncomingDoc(dynamic args) async {
     if (args is! Map) return;
     final name = args['name'];
-    const ch = MethodChannel('dsh/files');
     AppLog.instance.log('[doc] 收到外部文档 name=$name '
         'bytes=${(args['bytes'] as List?)?.length ?? 0} err=${args['error']}');
 
@@ -181,7 +190,7 @@ class _DshAppState extends State<DshApp> {
         );
       }
       try {
-        await ch.invokeMethod('clearIncomingFile');
+        await FileBridge.clearIncomingFile();
       } catch (_) {/* 清理失败不影响提示 */}
       return;
     }
@@ -202,7 +211,7 @@ class _DshAppState extends State<DshApp> {
       return;
     }
     try {
-      await ch.invokeMethod('clearIncomingFile');
+      await FileBridge.clearIncomingFile();
     } catch (_) {/* 清理失败不影响打开 */}
     AppLog.instance.log('[doc] 打开阅读页: $name (${bytes.length} 字节)');
     await nav.push(
@@ -249,6 +258,7 @@ class _DshAppState extends State<DshApp> {
 
   /// 冷启动兜底：拉取原生暂存的面板动作（configureFlutterEngine 投递时 Dart 侧可能未就绪）。
   Future<void> _consumePendingFloatingAction() async {
+    if (!Floating.isSupported) return;
     final action = await Floating.consumeOpenPanel();
     if (action == null || action.isEmpty) return;
     AppLog.instance.log('Floating: 冷启动消费动作 $action');

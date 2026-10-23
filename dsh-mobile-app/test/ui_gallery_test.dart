@@ -31,8 +31,18 @@ const Size _canvas = Size(390, 1560);
 /// 聊天版式分区画布。
 const Size _chatCanvas = Size(390, 1080);
 
+/// golden 基准图在 Windows（Deng 字体）上生成；macOS/CI 字体渲染不同，
+/// 非 Windows 平台跳过对比，iOS 视觉验证走模拟器截图（见 docs/ios-ci.md）。
+final bool _skipGoldens = !Platform.isWindows;
+
+/// 平台无关的 golden 测试包装（非 Windows 直接 skip，避免跨平台字体差异误报）。
+void _goldenTest(String description, Future<void> Function(WidgetTester) callback) {
+  testWidgets(description, callback, skip: _skipGoldens);
+}
+
 void main() {
   setUpAll(() async {
+    if (_skipGoldens) return;
     const families = <String>[
       'Roboto',
       'Microsoft YaHei',
@@ -42,7 +52,7 @@ void main() {
     await _registerFont(r'C:\Windows\Fonts\Deng.ttf', families);
   });
 
-  testWidgets('设计系统画廊 - 亮色', (tester) async {
+  _goldenTest('设计系统画廊 - 亮色', (tester) async {
     await tester.binding.setSurfaceSize(_canvas);
     await tester.pumpWidget(
       const _Gallery(brightness: Brightness.light, part: _Part.tokens),
@@ -57,7 +67,7 @@ void main() {
     );
   });
 
-  testWidgets('设计系统画廊 - 暗色', (tester) async {
+  _goldenTest('设计系统画廊 - 暗色', (tester) async {
     await tester.binding.setSurfaceSize(_canvas);
     await tester.pumpWidget(
       const _Gallery(brightness: Brightness.dark, part: _Part.tokens),
@@ -70,7 +80,7 @@ void main() {
     );
   });
 
-  testWidgets('聊天版式画廊 - 亮色', (tester) async {
+  _goldenTest('聊天版式画廊 - 亮色', (tester) async {
     await tester.binding.setSurfaceSize(_chatCanvas);
     await tester.pumpWidget(
       const _Gallery(brightness: Brightness.light, part: _Part.chat),
@@ -83,7 +93,7 @@ void main() {
     );
   });
 
-  testWidgets('聊天版式画廊 - 暗色', (tester) async {
+  _goldenTest('聊天版式画廊 - 暗色', (tester) async {
     await tester.binding.setSurfaceSize(_chatCanvas);
     await tester.pumpWidget(
       const _Gallery(brightness: Brightness.dark, part: _Part.chat),

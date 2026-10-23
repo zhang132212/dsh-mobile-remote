@@ -18,6 +18,7 @@ import '../logger.dart';
 import '../md.dart';
 import '../theme.dart';
 import '../toast.dart';
+import 'installer.dart';
 import 'updater.dart';
 
 /// 当前已安装的 versionCode（来自 pubspec 的 `+N`）。
@@ -41,6 +42,8 @@ Future<String> installedVersionName() async {
 
 /// 启动静默检查：只在**确实有新版本**时弹窗；任何失败都静默（不打扰使用）。
 Future<void> checkUpdateSilent(BuildContext context) async {
+  // iOS：不支持 App 内更新，启动时连网络都不打（设置页有静态说明，不打扰用户）。
+  if (!UpdateSupport.isSupported) return;
   try {
     if (!await Updater.shouldCheck()) return;
     await Updater.markChecked();
@@ -58,6 +61,11 @@ Future<void> checkUpdateSilent(BuildContext context) async {
 
 /// 手动检查：把结果如实告诉用户（含失败原因）。
 Future<void> checkUpdateInteractive(BuildContext context) async {
+  // iOS：设置页不展示可点击入口；这里防御性给一条明确说明，不发网络请求。
+  if (!UpdateSupport.isSupported) {
+    showToast(context, UpdateSupport.unsupportedMessage);
+    return;
+  }
   final code = await installedVersionCode();
   if (!context.mounted) return;
   showDialog<void>(
@@ -195,30 +203,31 @@ Future<void> _promptUpdate(BuildContext context, UpdateInfo info) async {
     ),
   );
 
-  Object? err;
   try {
     final apk = await Updater().download(info, onProgress: (p) => progress.value = p);
     if (!context.mounted) return;
     Navigator.of(context, rootNavigator: true).pop(); // 关进度
     if (!context.mounted) return;
-    // 拉起系统安装器；同签名可覆盖安装，无需卸载
-    final ok = await Updater.install(apk);
+    // 拉起系统安装器；同签名可覆盖安装，无需卸载。
+    // iOS 正常不可达（入口已隐藏）——防御性给出"去 App Store 更新"的说明。
+    final result = await Updater.install(apk);
     if (!context.mounted) return;
-    if (!ok) {
-      showToast(
-        context,
-        L10n.t('请允许「安装未知来源应用」后重试', 'Please allow "install unknown apps" and retry'),
-      );
+    switch (result) {
+      case ApkInstallResult.started:
+        AppLog.instance.log('[update] 已发起安装：${info.fileName}');
+      case ApkInstallResult.needsPermission:
+        showToast(
+          context,
+          L10n.t('请允许「安装未知来源应用」后重试', 'Please allow "install unknown apps" and retry'),
+        );
+      case ApkInstallResult.unsupportedPlatform:
+        showToast(context, UpdateSupport.unsupportedMessage);
     }
   } catch (e) {
-    err = e;
     if (!context.mounted) return;
     Navigator.of(context, rootNavigator: true).pop();
     if (!context.mounted) return;
     showToast(context, L10n.t('更新失败：$e', 'Update failed: $e'));
-  }
-  if (err == null) {
-    AppLog.instance.log('[update] 已发起安装：${info.fileName}');
   }
 }
 
@@ -229,6 +238,14 @@ class CheckUpdateTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = DshPalette.of(context);
+    // iOS：App 内自更新不可用——不展示可点击的「检查更新」入口，只说明更新方式。
+    if (!UpdateSupport.isSupported) {
+      return DshTile(
+        leading: const Icon(Icons.system_update_alt),
+        title: L10n.t('应用更新', 'App updates'),
+        subtitle: UpdateSupport.unsupportedMessage,
+      );
+    }
     return DshTile(
       leading: const Icon(Icons.system_update_alt),
       title: L10n.t('检查更新', 'Check for updates'),

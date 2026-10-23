@@ -258,8 +258,18 @@ ThemeData _theme(bool dark) {
   );
 }
 
+/// golden 基准图在 Windows（Deng 字体）上生成；macOS/CI 字体渲染不同，
+/// 非 Windows 平台跳过对比，iOS 视觉验证走模拟器截图（见 docs/ios-ci.md）。
+final bool _skipGoldens = !Platform.isWindows;
+
+/// 平台无关的 golden 测试包装（非 Windows 直接 skip，避免跨平台字体差异误报）。
+void _goldenTest(String description, Future<void> Function(WidgetTester) callback) {
+  testWidgets(description, callback, skip: _skipGoldens);
+}
+
 void main() {
   setUpAll(() async {
+    if (_skipGoldens) return;
     // 中文字体：官方回退栈里的族名 + 测试环境默认字体族名（'Ahem'/'FlutterTest'）。
     // 少数样式（如 appBarTheme.titleTextStyle）不带 fontFamilyFallback，会落到默认
     // 测试字体上画方块——把默认族名也指向中文字体，标题才不会变成「□□」。
@@ -272,9 +282,18 @@ void main() {
       'FlutterTest',
     ];
     await _registerFont(r'C:\Windows\Fonts\Deng.ttf', families);
-    // 图标字体：测试环境默认不加载 MaterialIcons → 图标会画成空方块（版式走查必须能看见图标）
+    // 图标字体：测试环境默认不加载 MaterialIcons → 图标会画成空方块（版式走查必须能看见图标）。
+    // 路径不再硬编码开发者机器（原为 C:\dsh-build-kit\flutter\...），按 FLUTTER_ROOT 动态解析。
+    final flutterRoot = Platform.environment['FLUTTER_ROOT'] ??
+        File(Platform.resolvedExecutable)
+            .parent
+            .parent
+            .parent
+            .parent
+            .parent
+            .path;
     await _registerFont(
-      r'C:\dsh-build-kit\flutter\bin\cache\artifacts\material_fonts\materialicons-regular.otf',
+      '$flutterRoot/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
       const ['MaterialIcons'],
     );
 
@@ -314,7 +333,7 @@ void main() {
     final tone = dark ? 'dark' : 'light';
     final label = dark ? '暗色' : '亮色';
 
-    testWidgets('首页 · $label', (tester) async {
+    _goldenTest('首页 · $label', (tester) async {
       await _shoot(
         tester,
         dark: dark,
@@ -323,7 +342,7 @@ void main() {
       );
     });
 
-    testWidgets('会话列表 · $label', (tester) async {
+    _goldenTest('会话列表 · $label', (tester) async {
       await _shoot(
         tester,
         dark: dark,
@@ -332,7 +351,7 @@ void main() {
       );
     });
 
-    testWidgets('通知中心 · $label', (tester) async {
+    _goldenTest('通知中心 · $label', (tester) async {
       await _shoot(
         tester,
         dark: dark,
@@ -343,7 +362,7 @@ void main() {
       );
     });
 
-    testWidgets('设置 · $label', (tester) async {
+    _goldenTest('设置 · $label', (tester) async {
       await _shoot(
         tester,
         dark: dark,

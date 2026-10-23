@@ -19,7 +19,9 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../l10n.dart';
 import '../logger.dart';
+import '../platform_support.dart';
 import 'installer.dart';
 import 'update_manifest.dart';
 
@@ -28,6 +30,35 @@ const String kUpdateRepo = 'zhang132212/dsh-mobile-remote';
 
 /// Release 里承载签名 manifest 的资产名。
 const String kManifestAssetName = 'update.json';
+
+/// iOS 更新策略（T3）。
+///
+/// App Store 政策不允许 App 内下载可执行包并覆盖安装，iOS 侧也没有系统安装器通道，
+/// 因此 iOS 上「检查更新 / 下载 APK / 安装」整体不可用：入口在设置页隐藏，
+/// 用户侧统一引导走 TestFlight / App Store；调用层返回明确的 unsupported 状态，
+/// 而不是让 MethodChannel 抛 MissingPluginException。
+class UpdateSupport {
+  UpdateSupport._();
+
+  /// 当前平台是否支持 App 内自更新（Android：签名 manifest 校验 + APK 覆盖安装）。
+  static bool get isSupported => DshPlatform.supportsInAppApkUpdate;
+
+  /// iOS 不可用时的统一文案（设置页/检查更新入口共用）。
+  static String get unsupportedMessage => L10n.t(
+        'iOS 版本请通过 TestFlight / App Store 更新',
+        'On iOS, update via TestFlight or the App Store',
+      );
+}
+
+/// 当前平台不支持 App 内自更新时抛出（如 iOS）。`message` 已是用户可读文案。
+class UpdateUnsupportedException implements Exception {
+  const UpdateUnsupportedException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
 
 /// 已安装版本 info 的持久化键（重放防护用）。
 const String _kSeqKey = 'update_seq';
@@ -84,7 +115,11 @@ class Updater {
   }
 
   /// 检查更新。返回 null = 已是最新；抛异常 = 检查失败（网络/验签/字段非法）。
+  /// iOS 不支持 App 内更新：直接抛 [UpdateUnsupportedException]（不发起网络请求）。
   Future<UpdateInfo?> check({required int installedVersionCode}) async {
+    if (!UpdateSupport.isSupported) {
+      throw UpdateUnsupportedException(UpdateSupport.unsupportedMessage);
+    }
     final release = await _fetchLatestRelease();
     final manifestText = await _fetchManifestText(release);
 
@@ -232,7 +267,8 @@ class Updater {
   }
 
   /// 触发系统安装器（用户确认后系统安装；同签名可**覆盖安装，无需卸载**）。
-  static Future<bool> install(File apk) => ApkInstaller.install(apk);
+  /// iOS 返回 [ApkInstallResult.unsupportedPlatform]（不触碰通道）。
+  static Future<ApkInstallResult> install(File apk) => ApkInstaller.install(apk);
 
   // ── GitHub ──
 

@@ -22,11 +22,9 @@ import '../docs/model.dart';
 import '../docs/render.dart';
 import '../dsh_kit.dart';
 import '../l10n.dart';
+import '../platform_support.dart';
 import '../theme.dart';
 import '../toast.dart';
-
-/// 原生文件通道（saveToDownloads / getIncomingFile / clearIncomingFile）。
-const MethodChannel _filesChannel = MethodChannel('dsh/files');
 
 class DocViewerScreen extends StatefulWidget {
   /// 文件名（含扩展名），用于判定格式
@@ -222,18 +220,20 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         return;
       }
       final outName = '${doc.title.isEmpty ? 'document' : doc.title}.docx';
-      final where = await _filesChannel.invokeMethod<String>('saveToDownloads', {
-        'name': outName,
-        'bytes': bytes,
-      });
+      final where = await FileBridge.saveToDownloads(name: outName, bytes: bytes);
       if (!mounted) return;
+      // iOS：没有系统「下载」目录 → 说明落在 App 文稿（文件 App / 分享面板可见）。
+      // Android 保持原「已导出到...」文案不变。
+      final loc = DshPlatform.isIOS
+          ? FileBridge.savedMessage(where)
+          : L10n.t('已导出到「${where ?? outName}」', 'Saved to "${where ?? outName}"');
       final hasMath = documentHasMath(doc);
       showToast(
         context,
         hasMath
-            ? L10n.t('已导出到「$where」\n公式是 Word 原生公式，可在 Word 里 Alt+= 编辑',
-                'Saved to "$where"\nEquations are native Word equations (editable with Alt+=)')
-            : L10n.t('已导出到「$where」', 'Saved to "$where"'),
+            ? L10n.t('$loc\n公式是 Word 原生公式，可在 Word 里 Alt+= 编辑',
+                '$loc\nEquations are native Word equations (editable with Alt+=)')
+            : loc,
       );
     } catch (e) {
       if (!mounted) return;
@@ -246,12 +246,21 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
     final raw = _raw;
     if (raw == null) return;
     try {
-      final where = await _filesChannel.invokeMethod<String>('saveToDownloads', {
-        'name': widget.name.split(RegExp(r'[\\/]')).last,
-        'bytes': raw,
-      });
+      final where = await FileBridge.saveToDownloads(
+        name: widget.name.split(RegExp(r'[\\/]')).last,
+        bytes: raw,
+      );
       if (!mounted) return;
-      showToast(context, L10n.t('已保存到「$where」', 'Saved to "$where"'));
+      // iOS：保存位置是 App 文稿（文件 App / 分享面板可见）；Android 文案保持原样。
+      showToast(
+        context,
+        DshPlatform.isIOS
+            ? FileBridge.savedMessage(where)
+            : L10n.t(
+                '已保存到「${where ?? widget.name}」',
+                'Saved to "${where ?? widget.name}"',
+              ),
+      );
     } catch (e) {
       if (!mounted) return;
       showToast(context, L10n.t('保存失败：$e', 'Save failed: $e'));

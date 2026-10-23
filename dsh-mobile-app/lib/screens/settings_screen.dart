@@ -20,6 +20,7 @@ import '../store.dart';
 import '../theme.dart';
 import '../toast.dart';
 import '../update/update_ui.dart';
+import '../update/updater.dart';
 import 'providers_screen.dart';
 import 'sheets.dart';
 import 'usage_screen.dart';
@@ -59,6 +60,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _initBubbleState() async {
+    // iOS：没有系统悬浮球能力——不探测、不自动拉起，开关保持关（UI 显示"不可用"说明）。
+    if (!Floating.isSupported) {
+      if (mounted) setState(() => _bubbleOn = false);
+      return;
+    }
     final on = await Floating.isRunning();
     final want = widget.store.floatingEnabled;
     final canOverlay = await Floating.canDrawOverlay();
@@ -78,6 +84,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// 悬浮球开关：打开需悬浮窗权限（未授权 → 居中弹窗引导），关闭即停止服务。
   Future<void> _toggleBubble(bool v) async {
+    // iOS：设置页不展示开关；这里防御性兜底，避免任何残留入口把状态写成"开"。
+    if (!Floating.isSupported) {
+      showToast(context, Floating.unsupportedHint);
+      return;
+    }
     if (v) {
       final ok = await Floating.canDrawOverlay();
       if (!ok) {
@@ -218,8 +229,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _usage = snapshot;
         _usageError = snapshot.failedCount > 0 ? 'partial' : null;
       });
-      // 余额联动悬浮球与预警仍只使用 DeepSeek 金额余额。
-      if (total != null) unawaited(Floating.notifyBalance(total));
+      // 余额联动悬浮球与预警仍只使用 DeepSeek 金额余额（iOS 无悬浮球，跳过同步）。
+      if (total != null && Floating.isSupported) {
+        unawaited(Floating.notifyBalance(total));
+      }
       if (widget.store.balanceAlert &&
           total != null &&
           total < widget.store.balanceThreshold &&
@@ -841,22 +854,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
               trailing: value(store.language == 'en' ? 'English' : '中文'),
               onTap: () => _pickLanguage(store),
             ),
-            DshTile(
-              leading: const Icon(Icons.bubble_chart_outlined),
-              title: L10n.t('悬浮球', 'Floating bubble'),
-              subtitle: L10n.t(
-                '桌面悬浮球：agent 运行/通知/余额低时亮起，单击展开面板（默认关）',
-                'Floating bubble: lights up on activity, tap to open panel (off by default)',
+            // iOS：系统悬浮球不可用——显示降级说明、不展示开关
+            //（避免出现"开关打开但其实没有服务"的假象）。
+            if (Floating.isSupported) ...[
+              DshTile(
+                leading: const Icon(Icons.bubble_chart_outlined),
+                title: L10n.t('悬浮球', 'Floating bubble'),
+                subtitle: L10n.t(
+                  '桌面悬浮球：agent 运行/通知/余额低时亮起，单击展开面板（默认关）',
+                  'Floating bubble: lights up on activity, tap to open panel (off by default)',
+                ),
+                trailing: DshSwitch(value: _bubbleOn, onChanged: _toggleBubble),
               ),
-              trailing: DshSwitch(value: _bubbleOn, onChanged: _toggleBubble),
-            ),
-            DshTile(
-              leading: const Icon(Icons.help_outline),
-              title: L10n.t('悬浮球操作说明', 'Bubble guide'),
-              subtitle: L10n.t('状态含义与手势操作', 'Status meaning and gestures'),
-              chevron: true,
-              onTap: _showBubbleGuide,
-            ),
+              DshTile(
+                leading: const Icon(Icons.help_outline),
+                title: L10n.t('悬浮球操作说明', 'Bubble guide'),
+                subtitle: L10n.t('状态含义与手势操作', 'Status meaning and gestures'),
+                chevron: true,
+                onTap: _showBubbleGuide,
+              ),
+            ] else
+              DshTile(
+                leading: const Icon(Icons.bubble_chart_outlined),
+                title: L10n.t('悬浮球', 'Floating bubble'),
+                subtitle: Floating.unsupportedHint,
+                trailing: DshTag(
+                  label: L10n.t('不可用', 'Unavailable'),
+                  dense: true,
+                  color: c.ink3,
+                ),
+              ),
           ],
         ),
         DshSectionHeader(L10n.t('关于', 'About')),
@@ -869,23 +896,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'App v${_appVersion.isEmpty ? '…' : _appVersion}'
                   ' · ${L10n.t('插件', 'plugin')} v${api.pluginVersion.isEmpty ? '…' : api.pluginVersion}',
             ),
-            // v3.2.1：应用内更新入口——检测到新版后可直接覆盖安装（同签名，无需卸载）
-            DshTile(
-              leading: const Icon(Icons.system_update_alt),
-              title: L10n.t('检查更新', 'Check for updates'),
-              subtitle: L10n.t(
-                '有新版本会提示，可直接覆盖安装',
-                'Prompts on new versions; installs right over the current app',
+            // v3.2.1：应用内更新入口——检测到新版后可直接覆盖安装（同签名，无需卸载）。
+            // iOS：不允许 App 内安装可执行包——隐藏「检查」入口，只说明更新方式。
+            if (UpdateSupport.isSupported)
+              DshTile(
+                leading: const Icon(Icons.system_update_alt),
+                title: L10n.t('检查更新', 'Check for updates'),
+                subtitle: L10n.t(
+                  '有新版本会提示，可直接覆盖安装',
+                  'Prompts on new versions; installs right over the current app',
+                ),
+                trailing: DshButton(
+                  label: L10n.t('检查', 'Check'),
+                  size: DshButtonSize.sm,
+                  variant: DshButtonVariant.outline,
+                  onPressed: () {
+                    checkUpdateInteractive(context);
+                  },
+                ),
+              )
+            else
+              DshTile(
+                leading: const Icon(Icons.system_update_alt),
+                title: L10n.t('应用更新', 'App updates'),
+                subtitle: UpdateSupport.unsupportedMessage,
+                trailing: DshTag(
+                  label: L10n.t('App Store', 'App Store'),
+                  dense: true,
+                  color: c.ink3,
+                ),
               ),
-              trailing: DshButton(
-                label: L10n.t('检查', 'Check'),
-                size: DshButtonSize.sm,
-                variant: DshButtonVariant.outline,
-                onPressed: () {
-                  checkUpdateInteractive(context);
-                },
-              ),
-            ),
             DshTile(
               leading: const Icon(Icons.monitor_heart_outlined),
               title: L10n.t('环境诊断', 'Diagnostics'),
