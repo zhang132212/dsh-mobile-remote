@@ -59,14 +59,20 @@ class FileBridge {
   static const MethodChannel channel = MethodChannel('dsh/files');
 
   /// 保存字节到手机：Android 写「下载/DSH-Remote」；iOS 写 App 文稿（「文件」App 可见）。
+  ///
+  /// [share]：iOS 专有。用户**主动**保存/导出（导出 docx、另存原件、下载文件）时传 true，
+  /// 原生保存后弹出系统分享面板（UIActivityViewController）；Android 忽略该参数。
   static Future<String?> saveToDownloads({
     required String name,
     required Uint8List bytes,
+    bool share = false,
   }) =>
-      _guard(() => channel.invokeMethod<String>(
-            'saveToDownloads',
-            {'name': name, 'bytes': bytes},
-          ));
+      _guard(() => channel.invokeMethod<String>('saveToDownloads', {
+            'name': name,
+            'bytes': bytes,
+            // 只在 iOS + 用户主动动作时透传；Android 端参数保持原样。
+            if (share && DshPlatform.isIOS) 'share': true,
+          }));
 
   /// 选择本地文件上传；取消返回 null。
   static Future<Map<String, dynamic>?> pickFile() =>
@@ -82,14 +88,17 @@ class FileBridge {
   }
 
   /// 保存成功后的用户提示。
-  /// iOS 没有系统「下载」目录：文件落在 App 文稿，必须说清去哪里找（文件 App / 分享面板）。
+  ///
+  /// iOS 没有系统「下载」目录：文件落在 App 文稿，必须说清去哪里找（「文件」App）。
+  /// 原生返回的位置串是「DSH-Remote/文件名」这种**相对 App 文稿**的短串（T2 契约），
+  /// 因此这里拼上「已保存到 App 文稿：」，避免出现「App 文稿/...」被重复前缀。
   static String savedMessage(String? where) {
     final trimmed = where?.trim() ?? '';
     final loc = trimmed.isEmpty ? '' : '：$trimmed';
     return DshPlatform.isIOS
         ? L10n.t(
-            '已保存到 App 文稿$loc（可在「文件」App 或分享面板查看）',
-            'Saved to app documents$loc (open the Files app or share sheet to view)',
+            '已保存到 App 文稿$loc（可在「文件」App 查看）',
+            'Saved to the app documents folder$loc (open it in the Files app)',
           )
         : L10n.t('已保存到手机$loc', 'Saved on phone$loc');
   }

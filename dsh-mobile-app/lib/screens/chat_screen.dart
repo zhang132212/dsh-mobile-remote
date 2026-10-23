@@ -2723,9 +2723,14 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final bytes = await _api.downloadFile(path);
       final name = path.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).lastOrNull ?? 'file';
-      final saved = await FileBridge.saveToDownloads(name: name, bytes: bytes);
+      // 用户主动下载：iOS 保存后弹系统分享面板（Android 忽略 share 参数）。
+      final saved = await FileBridge.saveToDownloads(
+        name: name,
+        bytes: bytes,
+        share: true,
+      );
       if (mounted) {
-        // iOS：落在 App 文稿（「文件」App / 分享面板可见），文案由 FileBridge 按平台给。
+        // iOS：落在 App 文稿（「文件」App 可见），文案由 FileBridge 按平台给。
         showToast(context, FileBridge.savedMessage(saved));
       }
     } catch (e) {

@@ -1,9 +1,12 @@
-# iOS 移植 CI：macOS 构建 + 模拟器冒烟 + 证据回传
+# iOS 移植 CI：macOS 构建 + 模拟器冒烟 + Android 回归 + 证据回传
 #
-# 触发：push 到 ios/port；或手动 workflow_dispatch。
-# 产物：用 GITHUB_TOKEN 强制推送到 ci-artifacts 分支（孤儿提交，只放产物，不碰业务分支）。
-#       失败也会回传（if: always()），便于没有 GitHub API token 的环境用 git 取日志/截图/失败清单。
-# 说明：docs/ios-ci.md
+# 结构：
+#   ios      —— macOS runner：pub get / analyze / test / 设备版 release 构建 / 模拟器 debug 构建 / 模拟器冒烟截图
+#   android  —— ubuntu runner：flutter build apk --release（证明 Dart 侧改动没有破坏 Android 构建；非阻塞）
+#   report   —— 汇总两个 job 的证据，一次性回传到 ci-artifacts 分支（孤儿提交，只放产物）
+#
+# 产物回传失败也照常回传（if: always()）；业务分支不受影响。
+# 说明文档：docs/ios-ci.md
 name: iOS CI
 
 on:
@@ -23,6 +26,10 @@ on:
         description: "排障用：flutter test 失败也判本 job 成功（默认 false）"
         type: boolean
         default: false
+      skip_android:
+        description: "排障用：跳过 Android 回归构建（默认 false，正常运行）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write          # 回传 ci-artifacts 分支需要
@@ -34,15 +41,19 @@ concurrency:
 env:
   FLUTTER_VERSION: "3.47.7"     # 与本地 SDK 一致（stable / Dart 3.13.5）
   APP_DIR: "dsh-mobile-app"
-  CI_OUT: ${{ github.workspace }}/ci-out
-  BUILD_LOG: ${{ github.workspace }}/ci-out/build.log
   ARTIFACTS_BRANCH: "ci-artifacts"
 
 jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # 1) iOS：macOS 构建 + 模拟器冒烟
+  # ────────────────────────────────────────────────────────────────────────────
   ios:
-    name: macOS build + simulator smoke
+    name: iOS 构建 + 模拟器冒烟（macOS）
     runs-on: ${{ github.event.inputs.runner || 'macos-15' }}
-    timeout-minutes: 75
+    timeout-minutes: 100
+    env:
+      CI_OUT: ${{ github.workspace }}/ci-out
+      BUILD_LOG: ${{ github.workspace }}/ci-out/build.log
     steps:
       - name: Checkout
         id: checkout
@@ -50,7 +61,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Windows 侧 core.autocrlf=true，脚本可能以 CRLF 提交；这里统一成 LF（幂等）。
+      # Windows 侧 core.autocrlf=true，工具脚本可能以 CRLF 提交；这里统一成 LF（幂等）。
       - name: 规范化 CI 脚本换行
         if: always() && steps.checkout.outcome == 'success'
         run: |
@@ -58,7 +69,7 @@ jobs:
           mkdir -p "$CI_OUT"
           for f in tools/ios-ci/*.sh; do
             [ -f "$f" ] || continue
-            sed -i '' 's/\r$//' "$f" 2>/dev/null || sed -i 's/\r$//' "$f" || true
+            sed -i '' 's/\r$//' "$f" 2>/dev/null || sed -i 's/\r$//' "$f" 2>/dev/null || true
           done
           chmod +x tools/ios-ci/*.sh 2>/dev/null || true
           echo "CI 脚本换行已规范化（幂等）" > "$BUILD_LOG"
@@ -88,16 +99,7 @@ jobs:
         id: pub
         if: always() && steps.install.outcome == 'success'
         continue-on-error: true
-        working-directory: dsh-mobile-app
-        run: |
-          set -uo pipefail
-          printf '\n===== STEP pub-get  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
-          if grep -q 'pub.flutter-io.cn' pubspec.lock 2>/dev/null; then
-            sed -i '' 's#https://pub.flutter-io.cn#https://pub.dev#g' pubspec.lock
-            echo "pubspec.lock: hosted 源由 pub.flutter-io.cn 改写为 pub.dev（仅 CI 工作区，不提交）" | tee -a "$BUILD_LOG"
-          fi
-          flutter --version 2>&1 | tee -a "$BUILD_LOG"
-          flutter pub get 2>&1 | tee -a "$BUILD_LOG"
+        run: bash tools/ios-ci/pub-get.sh
 
       - name: 静态分析 flutter analyze
         id: analyze
@@ -109,7 +111,7 @@ jobs:
           printf '\n===== STEP analyze  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
           flutter analyze --no-pub 2>&1 | tee -a "$BUILD_LOG"
 
-      - name: 测试 flutter test（全量测试文件）
+      - name: 测试 flutter test（全量测试）
         id: test
         if: always() && steps.pub.outcome == 'success'
         continue-on-error: true
@@ -141,7 +143,7 @@ jobs:
           # 设备版 Runner.app 不能装进模拟器，冒烟必须用 iphonesimulator 产物
           flutter build ios --simulator --debug 2>&1 | tee -a "$BUILD_LOG"
 
-      - name: iOS Simulator 冒烟（启动模拟器 / 安装 / 启动 App / 截图）
+      - name: iOS Simulator 冒烟（启动 / 安装 / 启动 App / 首帧计时 / 截图 / 存活校验）
         id: smoke
         if: always() && steps.build_sim.outcome == 'success'
         continue-on-error: true
@@ -149,13 +151,35 @@ jobs:
           SMOKE_WAIT_SEC: "12"
         run: bash tools/ios-ci/sim-smoke.sh
 
+      - name: 集成测试 flutter test integration_test（复用冒烟用模拟器）
+        id: integration
+        if: always() && steps.build_sim.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 15
+        working-directory: dsh-mobile-app
+        run: |
+          set -uo pipefail
+          printf '\n===== STEP integration-test  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
+          if [ ! -d integration_test ]; then
+            echo "integration_test/ 目录不存在，跳过（dart-platform 提交后自动生效）" | tee -a "$BUILD_LOG"
+            exit 0
+          fi
+          UDID="$(sed -n 's/^udid=//p' "$CI_OUT/sim-udid.txt" 2>/dev/null | head -1)"
+          if [ -n "$UDID" ]; then
+            echo "使用冒烟步骤启动的模拟器: $UDID" | tee -a "$BUILD_LOG"
+            flutter test integration_test -d "$UDID" --reporter expanded 2>&1 | tee -a "$BUILD_LOG"
+          else
+            echo "⚠️ 未拿到 sim-udid.txt，退化用 -d iPhone 选择设备" | tee -a "$BUILD_LOG"
+            flutter test integration_test -d iPhone --reporter expanded 2>&1 | tee -a "$BUILD_LOG"
+          fi
+
       - name: 收集产物（清单 / 日志 / 截图 / golden 失败图）
         id: collect
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
         run: bash tools/ios-ci/collect-artifacts.sh
 
-      - name: 汇总结果与失败清单（写 summary.md / status.txt）
+      - name: 汇总 iOS 结果（写 status.txt / summary.md）
         id: verdict
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
@@ -170,9 +194,184 @@ jobs:
           OUT_BUILD_DEVICE: ${{ steps.build_device.outcome }}
           OUT_BUILD_SIM: ${{ steps.build_sim.outcome }}
           OUT_SMOKE: ${{ steps.smoke.outcome }}
+          OUT_INTEGRATION: ${{ steps.integration.outcome }}
           OUT_COLLECT: ${{ steps.collect.outcome }}
           ALLOW_TEST_FAIL: ${{ github.event.inputs.allow_test_failures || 'false' }}
+          ALLOW_FAIL_STEPS: "integration-test"
         run: bash tools/ios-ci/verdict.sh
+
+      - name: 上传 iOS 证据（交给 report job 汇总回传）
+        id: upload
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-evidence
+          path: ci-out/
+          if-no-files-found: warn
+          retention-days: 7
+
+      # 兜底通道：即使 report job / artifact 传递出问题，也能从 ci-artifacts-ios 分支拿到 iOS 全量日志。
+      # 只推小文件（<1MB），跳过设备版 .app 归档；正式证据仍以 report job 的 ci-artifacts 为准。
+      - name: 兜底回传 iOS 证据（直传 ci-artifacts-ios 分支）
+        id: publish_fallback
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACTS_BRANCH: ci-artifacts-ios
+          ARTIFACT_MAX_BYTES: "8388608"
+        run: bash tools/ios-ci/publish-artifacts.sh
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 2) Android：release APK 回归构建（非阻塞，失败不影响 iOS 结论）
+  # ────────────────────────────────────────────────────────────────────────────
+  android:
+    name: Android release APK 回归（ubuntu）
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    if: ${{ github.event.inputs.skip_android != 'true' }}
+    env:
+      CI_OUT: ${{ github.workspace }}/ci-out
+      BUILD_LOG: ${{ github.workspace }}/ci-out/build.log
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 规范化 CI 脚本换行
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          mkdir -p "$CI_OUT"
+          for f in tools/ios-ci/*.sh; do
+            [ -f "$f" ] || continue
+            sed -i '' 's/\r$//' "$f" 2>/dev/null || sed -i 's/\r$//' "$f" 2>/dev/null || true
+          done
+          chmod +x tools/ios-ci/*.sh 2>/dev/null || true
+          echo "CI 脚本换行已规范化（幂等）" > "$BUILD_LOG"
+
+      - name: 安装 JDK 17
+        id: java
+        continue-on-error: true
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 安装 Flutter 3.47.7
+        id: install
+        continue-on-error: true
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.7"
+          channel: stable
+          cache: true
+
+      - name: 缓存 Gradle 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('dsh-mobile-app/android/**/*.gradle*', 'dsh-mobile-app/android/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: 依赖解析 flutter pub get
+        id: pub
+        if: always() && steps.install.outcome == 'success'
+        continue-on-error: true
+        run: bash tools/ios-ci/pub-get.sh
+
+      - name: 构建 Android release APK（回归验证）
+        id: build_apk
+        if: always() && steps.pub.outcome == 'success'
+        continue-on-error: true
+        working-directory: dsh-mobile-app
+        run: |
+          set -uo pipefail
+          printf '\n===== STEP build-apk  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
+          # 仓库没有 key.properties，release 会回退 debug 签名（见 android/app/build.gradle.kts），CI 可构建
+          flutter build apk --release --no-pub 2>&1 | tee -a "$BUILD_LOG"
+
+      - name: 收集 Android 证据
+        id: collect
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        env:
+          OUT_BUILD_APK: ${{ steps.build_apk.outcome }}
+        run: bash tools/ios-ci/android-collect.sh
+
+      - name: 上传 Android 证据
+        id: upload
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-evidence
+          path: ci-out/
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # 3) report：汇总证据 -> 生成 summary/run.json -> 回传 ci-artifacts 分支
+  # ────────────────────────────────────────────────────────────────────────────
+  report:
+    name: 汇总证据并回传 ci-artifacts 分支
+    needs: [ios, android]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI_OUT: ${{ github.workspace }}/ci-out-report
+      BUILD_LOG: ${{ github.workspace }}/ci-out-report/build.log
+      STAGING: ${{ github.workspace }}/staging
+      IOS_RESULT: ${{ needs.ios.result }}
+      ANDROID_RESULT: ${{ needs.android.result }}
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 规范化 CI 脚本换行
+        if: always() && steps.checkout.outcome == 'success'
+        run: |
+          set -uo pipefail
+          for f in tools/ios-ci/*.sh; do
+            [ -f "$f" ] || continue
+            sed -i '' 's/\r$//' "$f" 2>/dev/null || sed -i 's/\r$//' "$f" 2>/dev/null || true
+          done
+          chmod +x tools/ios-ci/*.sh 2>/dev/null || true
+
+      - name: 下载 iOS 证据
+        id: dl_ios
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-evidence
+          path: staging/ios
+
+      - name: 下载 Android 证据
+        id: dl_android
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: android-evidence
+          path: staging/android
+
+      - name: 汇总证据（summary.md / run.json / status.txt / 目录结构）
+        id: assemble
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        run: bash tools/ios-ci/assemble-report.sh
 
       - name: 回传产物到 ci-artifacts 分支
         id: publish
@@ -182,42 +381,28 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash tools/ios-ci/publish-artifacts.sh
 
-      - name: 上传运行产物（Actions artifact；下载需要 token，主通道是 ci-artifacts 分支）
-        id: upload
-        if: always() && steps.checkout.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-ci-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ci-out/build.log
-            ci-out/summary.md
-            ci-out/run.json
-            ci-out/smoke.png
-            ci-out/artifact-manifest.txt
-            ci-out/test-failures.txt
-            ci-out/env.txt
-            ci-out/sim-devices.txt
-            ci-out/ios-project-report.txt
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: 结果门禁（红 / 绿）
+      - name: 结果门禁（iOS 红则整体红；Android 失败只记录不阻塞）
         id: gate
         if: always()
         env:
           PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          IOS_JOB_RESULT: ${{ needs.ios.result }}
         run: |
           set -uo pipefail
           status="$(cat "$CI_OUT/status.txt" 2>/dev/null || echo failure)"
-          echo "流水线结论: $status"
+          echo "iOS 结论: $status"
+          echo "iOS job: ${IOS_JOB_RESULT:-unknown}"
           if [ "$status" != "success" ]; then
             echo "失败 / 未完成步骤："
             cat "$CI_OUT/failed-steps.txt" 2>/dev/null || echo "(无法读取 failed-steps.txt)"
             exit 1
           fi
-          if [ "${PUBLISH_OUTCOME:-}" != "success" ]; then
-            echo "⚠️ 产物回传（ci-artifacts 分支）未成功，本次证据需从 Actions 页面或人工排查读取。"
+          if [ "${IOS_JOB_RESULT:-}" != "success" ]; then
+            echo "❌ iOS job 结果不是 success"
             exit 1
           fi
-          echo "✅ 全部通过"
+          if [ "${PUBLISH_OUTCOME:-}" != "success" ]; then
+            echo "⚠️ 产物回传（ci-artifacts 分支）未成功，本次证据只能看 Actions 页面：设置 Settings -> Actions -> General -> Workflow permissions 为 Read and write。"
+            exit 1
+          fi
+          echo "✅ iOS 全部通过（Android 回归结果见 ci-artifacts 分支 summary.md）"

@@ -136,7 +136,9 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
       if (args["share"] as? Bool) == true {
         presentShareSheet(for: fileURL)
       }
-      result("App 文稿/\(Self.savedFolderName)/\(name)")
+      // 只返回「DSH-Remote/文件名」这种人类可读相对位置：Dart 侧 iOS 文案会拼成
+      // 「已保存到 App 文稿：DSH-Remote/xxx（可在「文件」App 查看）」，不要重复前缀、也不要暴露沙盒绝对路径。
+      result("\(Self.savedFolderName)/\(name)")
     } catch {
       result(FlutterError(code: "save-failed", message: error.localizedDescription, details: nil))
     }

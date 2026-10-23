@@ -75,10 +75,17 @@ PY
   fi
   echo ""
   echo "-- Podfile / SPM --"
+  # 事实（T2 确认）：Flutter 3.47.7 模板默认 SPM，本项目所有含原生代码的 iOS 插件都支持 SPM
+  # （path_provider_foundation 2.6.0 为纯 Dart），因此不会生成 Podfile、不会 pod install。
   if [ -f "$APP_DIR/ios/Podfile" ]; then
-    echo "  Podfile 存在"
+    echo "  Podfile 存在（CocoaPods 路径；首次 pod install 可能 3-8 分钟）"
   else
-    echo "  Podfile 不存在（Flutter build 会自动从模板生成；首次 pod install 可能较慢）"
+    echo "  Podfile 不存在 —— 预期行为（全插件支持 SPM，不需要 CocoaPods）"
+  fi
+  if [ -d "$APP_DIR/ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage" ]; then
+    echo "  SPM 生成包存在（flutter build ios 会生成/刷新）"
+  else
+    echo "  SPM 生成包尚未生成（flutter build ios 时自动生成）"
   fi
 } > "$REPORT" 2>&1
 

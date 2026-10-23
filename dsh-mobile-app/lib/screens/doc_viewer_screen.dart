@@ -220,9 +220,14 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         return;
       }
       final outName = '${doc.title.isEmpty ? 'document' : doc.title}.docx';
-      final where = await FileBridge.saveToDownloads(name: outName, bytes: bytes);
+      // 用户主动导出：iOS 保存后弹系统分享面板（T2：share=true → UIActivityViewController；Android 忽略该参数）。
+      final where = await FileBridge.saveToDownloads(
+        name: outName,
+        bytes: bytes,
+        share: true,
+      );
       if (!mounted) return;
-      // iOS：没有系统「下载」目录 → 说明落在 App 文稿（文件 App / 分享面板可见）。
+      // iOS：没有系统「下载」目录 → 说明落在 App 文稿（「文件」App 可见）。
       // Android 保持原「已导出到...」文案不变。
       final loc = DshPlatform.isIOS
           ? FileBridge.savedMessage(where)
@@ -246,12 +251,14 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
     final raw = _raw;
     if (raw == null) return;
     try {
+      // 用户主动另存：iOS 保存后弹系统分享面板（Android 忽略 share 参数）。
       final where = await FileBridge.saveToDownloads(
         name: widget.name.split(RegExp(r'[\\/]')).last,
         bytes: raw,
+        share: true,
       );
       if (!mounted) return;
-      // iOS：保存位置是 App 文稿（文件 App / 分享面板可见）；Android 文案保持原样。
+      // iOS：保存位置是 App 文稿（「文件」App 可见）；Android 文案保持原样。
       showToast(
         context,
         DshPlatform.isIOS

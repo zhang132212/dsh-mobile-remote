@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 收集本次 CI 的产物到 ci-out：产物清单、设备版 .app 归档、golden 失败证据、失败行抽取。
+# 收集本次 iOS CI 的产物到 ci-out：产物清单、体积数据、设备版 .app 归档、golden 失败证据、失败行抽取；
+# 最后 shutdown 冒烟用过的模拟器。
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
@@ -7,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 : "${APP_DIR:?APP_DIR 未设置}"
 MAN="$CI_OUT/artifact-manifest.txt"
+DEVICE_APP="$APP_DIR/build/ios/iphoneos/Runner.app"
+SIM_APP="$APP_DIR/build/ios/iphonesimulator/Runner.app"
 
 step "collect-artifacts"
 
@@ -54,14 +57,30 @@ describe_app() {
   find "$app" -maxdepth 1 -mindepth 1 | sort | sed 's/^/    - /' >> "$MAN"
 }
 
-describe_app "$APP_DIR/build/ios/iphoneos/Runner.app" "设备版 Runner.app（flutter build ios --release --no-codesign）"
-describe_app "$APP_DIR/build/ios/iphonesimulator/Runner.app" "模拟器版 Runner.app（flutter build ios --simulator --debug）"
+describe_app "$DEVICE_APP" "设备版 Runner.app（flutter build ios --release --no-codesign）"
+describe_app "$SIM_APP" "模拟器版 Runner.app（flutter build ios --simulator --debug）"
+
+# 体积数据（供 summary / run.json 使用）
+: > "$CI_OUT/sizes.txt"
+record_size() {
+  name="$1"
+  dir="$2"
+  if [ -d "$dir" ]; then
+    kb="$(du -sk "$dir" 2>/dev/null | cut -f1)"
+    echo "$name"_app_bytes="$((${kb:-0} * 1024))" >> "$CI_OUT/sizes.txt"
+    echo "$name"_app_human="$(du -sh "$dir" 2>/dev/null | cut -f1)" >> "$CI_OUT/sizes.txt"
+  fi
+}
+record_size device "$DEVICE_APP"
+record_size sim "$SIM_APP"
 
 # 归档设备版 .app（DoD 要求产物归档）；模拟器版只登记清单，避免仓库膨胀
-ARCH_SRC="$APP_DIR/build/ios/iphoneos/Runner.app"
-if [ -d "$ARCH_SRC" ]; then
+if [ -d "$DEVICE_APP" ]; then
   ( cd "$APP_DIR/build/ios/iphoneos" && ditto -c -k --sequesterRsrc --keepParent Runner.app "$CI_OUT/Runner-device-release.app.zip" ) >> "$BUILD_LOG" 2>&1 || true
   if [ -f "$CI_OUT/Runner-device-release.app.zip" ]; then
+    zip_kb="$(du -sk "$CI_OUT/Runner-device-release.app.zip" 2>/dev/null | cut -f1)"
+    echo "device_zip_bytes=$((${zip_kb:-0} * 1024))" >> "$CI_OUT/sizes.txt"
+    echo "device_zip_human=$(du -h "$CI_OUT/Runner-device-release.app.zip" | cut -f1)" >> "$CI_OUT/sizes.txt"
     log "已归档设备版 .app -> Runner-device-release.app.zip ($(du -h "$CI_OUT/Runner-device-release.app.zip" | cut -f1))"
     manifest_line ""
     manifest_line "## 归档"
@@ -83,5 +102,14 @@ if [ -f "$BUILD_LOG" ]; then
   log "test-failures.txt: $(wc -l < "$CI_OUT/test-failures.txt" | tr -d ' ') 行"
 fi
 
-log "ci-out 目录内容:"
+# 关闭冒烟用过的模拟器（integration_test 之后统一收尾）
+if [ -f "$CI_OUT/sim-udid.txt" ]; then
+  SIM_UDID="$(head -1 "$CI_OUT/sim-udid.txt" 2>/dev/null || true)"
+  if [ -n "$SIM_UDID" ]; then
+    xcrun simctl shutdown "$SIM_UDID" >> "$BUILD_LOG" 2>&1 || true
+    log "已关闭模拟器 $SIM_UDID"
+  fi
+fi
+
+log "证据文件:"
 ls -la "$CI_OUT" | tee -a "$BUILD_LOG"

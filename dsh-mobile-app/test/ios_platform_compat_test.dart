@@ -91,13 +91,21 @@ void main() {
   });
 
   group('FileBridge · 文件通道降级', () {
-    test('iOS 保存文案：App 文稿 + 文件 App/分享面板', () {
+    test('iOS 保存文案：只有一层「已保存到 App 文稿：」前缀（T2 返回 DSH-Remote/<name>）', () {
       DshPlatform.debugOverrideIsIOS = true;
-      final msg = FileBridge.savedMessage('App 文稿/DSH-Remote/报告.docx');
-      expect(msg, contains('App 文稿'));
+      // T2 契约（2026-10-23 更新）：原生返回「DSH-Remote/<name>」这种相对 App 文稿的短串，
+      // Dart 侧只拼一次前缀，避免出现「App 文稿/App 文稿/...」重复。
+      final msg = FileBridge.savedMessage('DSH-Remote/报告.docx');
+      expect(msg, startsWith('已保存到 App 文稿：DSH-Remote/报告.docx'));
       expect(msg, contains('文件'));
-      expect(msg, contains('分享'));
-      expect(msg, contains('报告.docx'));
+      expect('App 文稿'.allMatches(msg).length, 1);
+    });
+
+    test('iOS 保存文案：原生未返回位置时也给完整说明', () {
+      DshPlatform.debugOverrideIsIOS = true;
+      final msg = FileBridge.savedMessage(null);
+      expect(msg, startsWith('已保存到 App 文稿'));
+      expect(msg, contains('文件'));
     });
 
     test('非 iOS 保存文案保持「已保存到手机」', () {
@@ -108,22 +116,59 @@ void main() {
       }
     });
 
-    test('saveToDownloads 成功返回原生位置串', () async {
+    test('saveToDownloads 成功返回原生位置串（默认不弹分享）', () async {
       DshPlatform.debugOverrideIsIOS = true;
+      Map<Object?, Object?>? captured;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(FileBridge.channel, (call) async {
         if (call.method != 'saveToDownloads') return null;
-        final args = call.arguments as Map;
-        expect(args['name'], 'a.md');
-        expect(args['bytes'], isA<Uint8List>());
-        return 'App 文稿/DSH-Remote/a.md';
+        captured = call.arguments as Map<Object?, Object?>;
+        expect(captured?['name'], 'a.md');
+        expect(captured?['bytes'], isA<Uint8List>());
+        return 'DSH-Remote/a.md';
       });
       final where = await FileBridge.saveToDownloads(
         name: 'a.md',
         bytes: Uint8List.fromList([1, 2, 3]),
       );
-      expect(where, 'App 文稿/DSH-Remote/a.md');
-      expect(FileBridge.savedMessage(where), contains('a.md'));
+      expect(where, 'DSH-Remote/a.md');
+      expect(FileBridge.savedMessage(where), startsWith('已保存到 App 文稿：DSH-Remote/a.md'));
+      expect(captured?.containsKey('share'), isFalse); // 默认静默保存
+    });
+
+    test('iOS 用户主动保存 share=true → 透传给原生（弹系统分享面板）', () async {
+      DshPlatform.debugOverrideIsIOS = true;
+      Map<Object?, Object?>? captured;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(FileBridge.channel, (call) async {
+        if (call.method != 'saveToDownloads') return null;
+        captured = call.arguments as Map<Object?, Object?>;
+        return 'DSH-Remote/a.docx';
+      });
+      await FileBridge.saveToDownloads(
+        name: 'a.docx',
+        bytes: Uint8List.fromList([1]),
+        share: true,
+      );
+      expect(captured?['share'], isTrue);
+    });
+
+    test('非 iOS 不透传 share（Android 通道参数保持原样）', () async {
+      DshPlatform.debugOverrideIsIOS = null;
+      if (Platform.isIOS) return;
+      Map<Object?, Object?>? captured;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(FileBridge.channel, (call) async {
+        if (call.method != 'saveToDownloads') return null;
+        captured = call.arguments as Map<Object?, Object?>;
+        return 'Download/DSH-Remote/a.docx';
+      });
+      await FileBridge.saveToDownloads(
+        name: 'a.docx',
+        bytes: Uint8List.fromList([1]),
+        share: true,
+      );
+      expect(captured?.containsKey('share'), isFalse);
     });
 
     test('pickFile 解码 name/bytes，用户取消返回 null', () async {

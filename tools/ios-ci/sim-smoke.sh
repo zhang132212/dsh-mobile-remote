@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # iOS Simulator 冒烟：boot 一台可用 iPhone -> 安装 iphonesimulator/Runner.app
-# -> 启动 -> 等待 -> 截图 -> 进程存活校验（崩溃则抓诊断）。
-# 注意：设备版 build/ios/iphoneos/Runner.app 不能装进模拟器，这里用 --simulator 产物。
+# -> 启动（记 PID / 调用耗时）-> 首帧检测（截图轮询）-> 截图 -> 进程存活校验（崩溃抓诊断）。
+# 证据写入 ci-out/smoke.txt：PID、启动耗时、首帧耗时、容器路径、包体积、Impeller 日志命中。
+# 注意 1：设备版 build/ios/iphoneos/Runner.app 不能装进模拟器，这里用 --simulator 产物。
+# 注意 2：模拟器启动后保持 booted（UDID 写入 ci-out/sim-udid.txt），供后续 integration_test 复用；
+#         由 collect-artifacts.sh 统一 shutdown。
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
@@ -11,6 +14,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_PATH="$APP_DIR/build/ios/iphonesimulator/Runner.app"
 WAIT_SEC="${SMOKE_WAIT_SEC:-12}"
 UDID=""
+BUNDLE_ID=""
+PID=""
+LAUNCH_CALL_MS=""
+FIRST_FRAME_MS=""
+
+now_ms() {
+  python3 -c 'import time; print(int(time.monotonic() * 1000))' 2>/dev/null || echo 0
+}
 
 step "sim-smoke"
 
@@ -88,8 +99,14 @@ if [ -z "$UDID" ]; then
   exit 1
 fi
 log "选中模拟器: $UDID ($SIM_DESC)"
+printf '%s\n' "$UDID" > "$CI_OUT/sim-udid.txt"
+printf '%s\n' "$SIM_DESC" > "$CI_OUT/sim-desc.txt"
+{
+  echo "udid=$UDID"
+  echo "device=$SIM_DESC"
+} > "$CI_OUT/sim-info.txt"
 
-# 状态栏美化（让截图更像真机；失败不影响冒烟）
+# 状态栏固定（截图更像真机，也保证首帧检测的截图基线稳定；失败不影响冒烟）
 xcrun simctl status_bar "$UDID" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 >/dev/null 2>&1 || true
 
 log "启动模拟器（已启动则忽略报错）…"
@@ -104,45 +121,112 @@ if ! xcrun simctl install "$UDID" "$APP_PATH" >> "$BUILD_LOG" 2>&1; then
 fi
 log "安装成功"
 
+# 首帧检测基线：启动前截一张桌面图，之后截图内容变化 = App 首帧已渲染
+HOME_SHOT="$CI_OUT/_sim_home.png"
+HOME_MD5=""
+if xcrun simctl io "$UDID" screenshot "$HOME_SHOT" >/dev/null 2>&1 && [ -f "$HOME_SHOT" ]; then
+  HOME_MD5="$(md5 -q "$HOME_SHOT" 2>/dev/null || true)"
+fi
+
 log "启动 App: xcrun simctl launch"
+T0="$(now_ms)"
 LAUNCH_OUT="$(xcrun simctl launch --terminate-running-process "$UDID" "$BUNDLE_ID" 2>&1)"
 LAUNCH_RC=$?
-log "launch rc=$LAUNCH_RC: $LAUNCH_OUT"
+T1="$(now_ms)"
+if [ "$T1" -gt "$T0" ] 2>/dev/null; then
+  LAUNCH_CALL_MS=$((T1 - T0))
+fi
+log "launch rc=$LAUNCH_RC 调用耗时=${LAUNCH_CALL_MS:-?}ms: $LAUNCH_OUT"
+PID="$(printf '%s' "$LAUNCH_OUT" | sed -n 's/.*: *\([0-9][0-9]*\).*/\1/p' | head -1)"
 if [ "$LAUNCH_RC" -ne 0 ]; then
   log "❌ simctl launch 失败"
   collect_diagnostics
   exit 1
 fi
 
-log "等待 $WAIT_SEC 秒观察是否崩溃…"
-sleep "$WAIT_SEC"
+ELAPSED=0
+if [ -n "$HOME_MD5" ]; then
+  log "首帧检测：每秒截图与桌面基线比对（最多 25s）…"
+  while [ "$ELAPSED" -lt 25 ]; do
+    sleep 1
+    ELAPSED=$((ELAPSED + 1))
+    POLL="$CI_OUT/_sim_poll.png"
+    xcrun simctl io "$UDID" screenshot "$POLL" >/dev/null 2>&1 || continue
+    CUR="$(md5 -q "$POLL" 2>/dev/null || true)"
+    if [ -n "$CUR" ] && [ "$CUR" != "$HOME_MD5" ]; then
+      NOW="$(now_ms)"
+      if [ "$NOW" -gt "$T0" ] 2>/dev/null; then
+        FIRST_FRAME_MS=$((NOW - T0))
+      fi
+      log "检测到画面变化（首帧已渲染），约 ${FIRST_FRAME_MS:-?}ms（截图轮询精度约 1s）"
+      break
+    fi
+  done
+  rm -f "$CI_OUT/_sim_poll.png"
+else
+  log "⚠️ 无法取得桌面基线截图，跳过首帧检测"
+fi
+
+REMAIN=$((WAIT_SEC - ELAPSED))
+if [ "$REMAIN" -gt 0 ]; then
+  log "继续等待 $REMAIN s 观察启动后稳定性…"
+  sleep "$REMAIN"
+fi
 
 SCREENSHOT="$CI_OUT/smoke.png"
 if xcrun simctl io "$UDID" screenshot "$SCREENSHOT" >> "$BUILD_LOG" 2>&1 && [ -f "$SCREENSHOT" ]; then
-  SIZE="$(stat -f%z "$SCREENSHOT" 2>/dev/null || echo 0)"
-  log "📸 截图 smoke.png（$SIZE bytes）"
-  if [ "$SIZE" -lt 20000 ] 2>/dev/null; then
-    log "⚠️ 截图偏小，可能是纯色/黑屏（首帧未渲染）"
+  SHOT_BYTES="$(stat -f%z "$SCREENSHOT" 2>/dev/null || echo 0)"
+  log "📸 截图 smoke.png（$SHOT_BYTES bytes）"
+  if [ "$SHOT_BYTES" -lt 20000 ] 2>/dev/null; then
+    log "⚠️ 截图偏小，可能是纯色/黑屏（首帧可能未渲染）"
   fi
 else
+  SHOT_BYTES="?"
   log "⚠️ simctl io screenshot 失败"
 fi
 
-if xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -F "UIKitApplication:$BUNDLE_ID" >/dev/null 2>&1; then
-  log "✅ App 进程存活（未崩溃）"
-else
+if ! xcrun simctl spawn "$UDID" launchctl list 2>/dev/null | grep -F "UIKitApplication:$BUNDLE_ID" >/dev/null 2>&1; then
   log "❌ App 进程不在 launchctl 列表中（疑似启动即崩溃）"
   collect_diagnostics
   exit 1
 fi
+log "✅ App 进程存活（未崩溃）"
 
-xcrun simctl terminate "$UDID" "$BUNDLE_ID" >> "$BUILD_LOG" 2>&1 || true
-xcrun simctl shutdown "$UDID" >> "$BUILD_LOG" 2>&1 || true
+CONTAINER="$(xcrun simctl get_app_container "$UDID" "$BUNDLE_ID" app 2>/dev/null || true)"
+if [ -n "$CONTAINER" ]; then
+  log "应用容器: $CONTAINER"
+fi
+
+SIM_KB="$(du -sk "$APP_PATH" 2>/dev/null | cut -f1)"
+SIM_BYTES="$((${SIM_KB:-0} * 1024))"
+SIM_HUMAN="$(du -sh "$APP_PATH" 2>/dev/null | cut -f1)"
+BIN_BYTES="$(stat -f%z "$APP_PATH/Runner" 2>/dev/null || echo '?')"
+IMPELLER_HITS="$(xcrun simctl spawn "$UDID" log show --last 2m --style compact 2>/dev/null | grep -ci 'impeller' || echo 0)"
+IMPELLER_SNIPPET="$(xcrun simctl spawn "$UDID" log show --last 2m --style compact 2>/dev/null | grep -i 'impeller' | head -1 || true)"
+
 {
   echo "udid=$UDID"
   echo "simulator=$SIM_DESC"
   echo "bundle_id=$BUNDLE_ID"
+  echo "pid=${PID:-unknown}"
+  echo "launch_call_ms=${LAUNCH_CALL_MS:-unknown}"
+  echo "first_frame_elapsed_ms=${FIRST_FRAME_MS:-unmeasured}"
+  echo "app_container=${CONTAINER:-unknown}"
+  echo "sim_app_bytes=$SIM_BYTES"
+  echo "sim_app_human=${SIM_HUMAN:-?}"
+  echo "runner_binary_bytes=$BIN_BYTES"
+  echo "impeller_log=$IMPELLER_HITS"
+  echo "impeller_snippet=$IMPELLER_SNIPPET"
   echo "wait_seconds=$WAIT_SEC"
-  echo "screenshot=s$(echo x)"
+  echo "screenshot=smoke.png"
+  echo "screenshot_bytes=$SHOT_BYTES"
+  echo "alive=yes"
+  echo "keep_booted=yes"
 } > "$CI_OUT/smoke.txt"
-log "✅ 模拟器冒烟通过"
+
+log "性能/冒烟证据: pid=${PID:-?} launch_call_ms=${LAUNCH_CALL_MS:-?} first_frame_elapsed_ms=${FIRST_FRAME_MS:-unmeasured} sim_app=${SIM_HUMAN:-?} impeller_log=$IMPELLER_HITS"
+
+rm -f "$CI_OUT/_sim_home.png"
+xcrun simctl terminate "$UDID" "$BUNDLE_ID" >> "$BUILD_LOG" 2>&1 || true
+# 模拟器保持 booted，供 integration_test 复用；由 collect-artifacts.sh 统一 shutdown
+log "✅ 模拟器冒烟通过（模拟器保持 booted 供 integration_test）"
