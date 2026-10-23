@@ -2738,6 +2738,30 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// image_picker 权限/可用性错误 → 用户可读中文。
+  /// iOS/Android 的 image_picker 直接抛 PlatformException(code: camera_access_denied 等)，
+  /// 原样拼进 toast 会让用户看到英文异常（cross-review 小项）。
+  String _imagePickErrorMessage(PlatformException e) {
+    return switch (e.code) {
+      'camera_access_denied' => L10n.t(
+          '未授权相机权限，请到 设置 → DSH Remote 开启相机权限后重试',
+          'Camera access denied. Allow camera access for DSH Remote in Settings and retry',
+        ),
+      'photo_access_denied' => L10n.t(
+          '未授权相册权限，请到 设置 → DSH Remote 开启照片权限后重试',
+          'Photo access denied. Allow photo access for DSH Remote in Settings and retry',
+        ),
+      'camera_not_available' || 'no_available_camera' => L10n.t(
+          '当前设备没有可用相机',
+          'No camera available on this device',
+        ),
+      _ => L10n.t(
+          '无法打开相册/相机：${e.message ?? e.code}',
+          'Could not open the camera/gallery: ${e.message ?? e.code}',
+        ),
+    };
+  }
+
   /// v3.0.0 图像链路：选图（原始解析，不压缩）——上限按内核 imageLimits（PC 端同源数字）。
   Future<void> _pickImages({required bool fromCamera}) async {
     if (_pickingImages) return;
@@ -2761,6 +2785,9 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       setState(() => _pendingImages.addAll(files.take(room)));
       _scrollToBottom();
+    } on PlatformException catch (e) {
+      // 权限被拒等已知 code → 中文可操作提示，不冒原始异常。
+      if (mounted) showToast(context, _imagePickErrorMessage(e));
     } catch (e) {
       if (mounted) {
         showToast(context, '${L10n.t('无法打开', 'Could not open: ')}$e');

@@ -68,6 +68,8 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
   private var docDelivered = false
   /// 暂存代际号：防止旧文档的延迟释放定时器误清掉新文档。
   private var pendingDocGeneration: UInt64 = 0
+  /// 当前暂存文档的投递 id（与 openDocument / getIncomingFile 里的 deliveryId 字段一致）。
+  private var pendingDocDeliveryId: String?
   /// 系统文件选择器的回调（同一时刻只允许一个选择器）。
   private var pendingPickResult: FlutterResult?
 
@@ -115,6 +117,7 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
       result(pendingDoc)
     case "clearIncomingFile":
       pendingDoc = nil
+      pendingDocDeliveryId = nil
       docDelivered = false
       result(true)
     default:
@@ -139,7 +142,9 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
     do {
       let dir = try documentsDirectory().appendingPathComponent(DshNativeBridge.savedFolderName, isDirectory: true)
       try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-      let fileURL = dir.appendingPathComponent(name)
+      // 同名文件不静默覆盖（与 Android MediaStore 自动改名行为对齐）：自动加 " (1)"、" (2)"… 后缀并保留扩展名。
+      let fileName = DshNativeBridge.uniqueFileName(name, in: dir)
+      let fileURL = dir.appendingPathComponent(fileName)
       try typed.data.write(to: fileURL, options: .atomic)
       // 可选：Dart 侧传 share=true 时弹系统分享面板（不阻塞 result，toast 立即返回）。
       if (args["share"] as? Bool) == true {
@@ -147,7 +152,7 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
       }
       // 只返回「DSH-Remote/文件名」这种人类可读相对位置：Dart 侧 iOS 文案会拼成
       // 「已保存到 App 文稿：DSH-Remote/xxx（可在「文件」App 查看）」，不要重复前缀、也不要暴露沙盒绝对路径。
-      result("\(DshNativeBridge.savedFolderName)/\(name)")
+      result("\(DshNativeBridge.savedFolderName)/\(fileName)")
     } catch {
       result(FlutterError(code: "save-failed", message: error.localizedDescription, details: nil))
     }
@@ -270,7 +275,12 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
       DshNativeBridge.assertMainThread()
-      var payload: [String: Any] = ["name": name]
+      // 每次「新投递」生成一个 deliveryId：openDocument 事件与 getIncomingFile 返回的是同一份
+      // pendingDoc（同一 id），Dart 据此把「事件推送 + 首帧主动拉取」两条路径去重；
+      // clearIncomingFile 之后再有文档进来会生成新 id。
+      let deliveryId = UUID().uuidString
+      self.pendingDocDeliveryId = deliveryId
+      var payload: [String: Any] = ["name": name, "deliveryId": deliveryId]
       if let error {
         payload["error"] = error
       }
@@ -296,6 +306,7 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
       guard let self else { return }
       guard self.pendingDocGeneration == generation, self.docDelivered else { return }
       self.pendingDoc = nil
+      self.pendingDocDeliveryId = nil
     }
   }
 
@@ -323,6 +334,21 @@ final class DshNativeBridge: NSObject, UIDocumentPickerDelegate {
                     userInfo: [NSLocalizedDescriptionKey: "documents directory unavailable"])
     }
     return url
+  }
+
+  /// 同名文件自动改名：<base> (1).<ext>、<base> (2).<ext>…（与 Android MediaStore 不覆盖行为对齐）。
+  private static func uniqueFileName(_ raw: String, in directory: URL) -> String {
+    let nsName = raw as NSString
+    let ext = nsName.pathExtension
+    let base = nsName.deletingPathExtension
+    var candidate = raw
+    var counter = 1
+    while FileManager.default.fileExists(atPath: directory.appendingPathComponent(candidate).path) {
+      candidate = ext.isEmpty ? "\(base) (\(counter))" : "\(base) (\(counter)).\(ext)"
+      counter += 1
+      if counter > 9999 { break } // 极端情况下避免死循环
+    }
+    return candidate
   }
 
   /// 去掉路径分隔符，避免外部传入的 name 越级写到别的目录。

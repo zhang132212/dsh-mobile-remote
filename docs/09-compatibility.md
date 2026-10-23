@@ -12,12 +12,12 @@
 |---|---|
 | 桌面端 DSH（Harness） | **v3.1.2/v3.1.3 机制基线：`0.1.2-rc.1` 服务包 = DSH Desktop v2.0.5**（approval/request 瀑布 answerer + `$events` 远程事件双端审批 + RPC 网关，见 §2）；旧基线 `0.1.1-rc.2` = v2.0.2 起适配（本文件 §2 同时保留两代机制说明，`apiProxy` 帧桥为旧内核路径） |
 | dsh-mobile-remote 插件 | **v3.0.0 基线；v3.2.0+ 才提供用量与额度**；`/m/api/diagnostics` 可自检 |
-| 手机 App（Android） | v3.0.0 基线（用量与额度需 v3.2.0+；使用同一 Release 的配套插件；App 与插件版本号独立）；不同版本可用但"谁旧谁吃亏"，详见 README「版本与兼容」；Android 7.0+、64 位机型 |
+| 手机 App（Android / iOS） | v3.0.0 基线（用量与额度需 v3.2.0+；使用同一 Release 的配套插件；App 与插件版本号独立）；不同版本可用但"谁旧谁吃亏"，详见 README「版本与兼容」；**Android 7.0+、64 位机型 / iOS 15.0+** |
 | 字段级兼容（v3.1.0 候选） | `reasoning`/`title` 为纯增量字段：新插件+旧 App 无影响（忽略新字段）；新 App+旧插件自动回退（不渲染折叠块 / 悬浮球标题兜底短码）——任意组合均可使用 |
 | 字段级兼容（v3.1.1） | `/m/api/directories` 根视图新增 `sep`（服务端路径分隔符）；新插件+旧 App 忽略该字段即可（旧 App 在 WSL 上仍按 `\` 拼接，由服务端`normalizeServerPath` 归一化兜底，浏览/建夹/建会话均可用）；新 App+旧插件缺少 `sep` 时按根视图推断分隔符——任意组合均可使用 |
 | 用量与额度（v3.2） | 新插件+新 App 通过 `/m/api/account-usage` 显示 DeepSeek/Codex/OpenCode Go；旧 App 忽略新端点。新 App+旧插件进入该入口会显示“电脑端插件版本过旧”，不影响其它功能；升级插件后无需重新配置凭据 |
 | 悬浮球面板用量与额度（v3.2） | 新 App+新插件：面板展开时按需展示三来源区块（金额行文字 + 配额行细条/颜色），整块可点进详情页。新 App+旧插件：区块整体降级为原有单行余额（点击仍=去充值），其余面板功能不受影响；旧 App 忽略新端点。无新增服务端契约 |
-| Flutter 构建环境 | Flutter 3.35+（Dart SDK ^3.13） |
+| Flutter 构建环境 | Flutter 3.47+（Dart SDK ^3.13；本工程验证版本 3.47.7） |
 
 **快速自检**：手机 App → 设置 → 环境诊断。`services` 一节列出每个内核服务是否存在；**v3.1.3+ 看 `checks.approvalMode`**（生效策略）与 **`checks.remoteEvents`**（`true` = `$events` 双端呈现通道就绪，`false` = both 降级 mobile 或配置即 mobile/desktop）；`notes` 首行说明当前审批策略实际语义。旧内核（0.1.1-rc.2 及更早）宿主才会出现 `services.apiProxy` / `checks.respondBridge` / `checks.frameBridge` / `checks.pendingFrames`（帧桥 era 探测项，v3.1.3 起仅帧桥激活时输出）——**0.1.2-rc.1+ 宿主看不到这些键属正常**。
 
@@ -95,14 +95,50 @@ App 为 Flutter 原生 APK（`com.dsh.remote`），渲染后端为 **Impeller（
 
 **如遇渲染异常**：把 `dsh-mobile-app/android/app/src/main/AndroidManifest.xml` 中 `EnableImpeller` 改为 `false` 出一个 Skia 版验证；App 代码无需改动（列表结构两种后端都验证过）。
 
-## 4. iOS（未开发）
+## 4. iOS（iOS 15.0+）
 
-> **原因**：开发者手上没有苹果设备（Mac/iPhone），无法构建、真机调试与签名分发 iOS 版本——因此 iOS 端**暂未开发**。**欢迎社区贡献**：iOS 适配工作量不大，任何有 Mac 的开发者都可以按下面清单完成并提交 PR（见 CONTRIBUTING.md）。
+App 与 Android 共用同一套 Dart 代码与插件（`dsh-mobile-app/`），iOS 端只补平台差异层。**最低 iOS 15.0**（Flutter 3.47 工程模板与 image_picker_ios 的硬性要求），bundle id `com.dsh.remote`，显示名 `DSH Remote`。iOS 工程由 npm 无依赖的 Swift Package Manager 集成（**无 Podfile / 无需 CocoaPods**），使用 Flutter 3.47 的 **UIScene 生命周期**（`SceneDelegate` + `UIApplicationSceneManifest`，Xcode 27/iOS 27 SDK 起 Apple 强制要求）。
 
-- **Dart 代码零平台依赖**，5 个插件（shared_preferences / http / path_provider / mobile_scanner / url_launcher）均有 iOS 实现；iOS 只有 Impeller 后端，而列表结构恰在 Impeller 下验证过——代码几乎不用改。
-- 需要：Mac + Xcode + Apple 开发者账号（自用免签/TestFlight）。
-- 必须的配置项（预计半天）：`Info.plist` 放行局域网 http（ATS `NSAllowsLocalNetworking`）、iOS 14+ 本地网络权限文案（`NSLocalNetworkUsageDescription`）、相机权限文案。
-- 分发：自用可用免费账号侧载（7 天重签）；公开分发走 TestFlight/App Store（需付费开发者账号）。
+| 维度 | 状态 | 说明 |
+|---|---|---|
+| 渲染 | ✅ Impeller（Metal） | iOS 上 Impeller 是**唯一**渲染引擎（不能切 Skia）；启动日志可见 `Using the Impeller rendering backend (Metal)` |
+| 系统版本 | iOS 15.0+ | 覆盖 iPhone 6s 及之后机型（Apple 支持范围）；模拟器验证为 iOS 26.2 / iPhone SE (3rd) |
+| 明文 HTTP | ✅ 仅限可信内网 | Flutter 走 dart:io socket，ATS 不拦截；真正门槛是「本地网络」权限（见下行）。ATS 配置为**放行任意加载**（理由：用户可自填任意 DSH 地址，含局域网/组网/自建 http）；`NSLocalNetworkUsageDescription` 单独保留 |
+| 本地网络权限 | ⚠️ 需用户允许 | iOS 14+ 首次连接局域网会弹系统授权；**拒绝或不理时首次请求会失败一次**——App 会自动退避重试，允许后即恢复；仍失败时到「设置 → 隐私与安全性 → 本地网络」放行 DSH Remote |
+| 扫码连接 | ✅ | mobile_scanner（AVFoundation）；首次需相机权限；也可从相册识别二维码（需相册权限）。模拟器无摄像头，相机链路需真机 |
+| 系统悬浮球 | ❌ 平台不支持 | iOS 无跨 App 悬浮窗 API。App 隐藏悬浮球入口并在设置页说明；后台提醒由 **Bark 推送**承担（与 Android 同一套推送配置，不依赖 App 存活） |
+| 后台常驻 / 后台 SSE | ❌ 平台不支持 | iOS 退后台后 App 会被挂起，无法像 Android 前台服务那样保持长连接。iOS 只保证**前台**实时流式；回前台自动重连并补拉。提醒走推送桥 |
+| App 内自更新 | ❌ 平台不支持 | iOS 不能安装 IPA。更新入口在 iOS 隐藏，版本升级只能经 **TestFlight / App Store**（或自行签名重装） |
+| 文件保存 | ✅ 语义不同 | 保存到 App「文稿」目录（`Documents/DSH-Remote/`），设置 `UIFileSharingEnabled` 后可在「文件」App → 我的 iPhone → DSH Remote 查看；用户主动保存/导出时弹系统分享面板（UIActivityViewController）。iOS 没有系统「下载」目录 |
+| 文件选择 | ✅ | 系统文档选择器（UIDocumentPickerViewController），取消返回 null |
+| 外部文档打开 | ✅ | `CFBundleDocumentTypes` 声明 md/txt/docx/xlsx，可从「文件」App/其他 App「用 DSH Remote 打开」（冷启动/热启动均支持） |
+| 系统通知 | ⚠️ 走推送桥 | App 内通知中心照旧；锁屏/后台提醒依赖 Bark / ntfy / Server酱（不依赖 App 存活） |
+| 深色 / 字体缩放 | ✅ | Flutter 主题跟随系统 |
+| 签名与分发 | ⚠️ 需 Apple 账号 | 自用：Mac + Xcode + 免费 Apple ID 侧载（**7 天重签**）；公开分发：TestFlight / App Store（需付费开发者账号） |
+
+**平台差异（不可实现项，显式降级，不是 bug）**：
+
+- **系统悬浮球**：Android 的透明悬浮球依赖 `SYSTEM_ALERT_WINDOW` + 前台服务，iOS 没有对应能力。iOS 端不显示悬浮球入口，设置页给出说明；"人不在电脑前"的提醒由**推送桥**（Bark 等）承担。
+- **后台常驻**：iOS App 退到后台会被挂起，无法保持 SSE。iOS 端只保证**前台**实时；切回前台自动重连并补拉。
+- **App 内自更新**：iOS 不允许 App 自行下载安装 IPA；更新走 TestFlight / App Store。
+- **本地网络权限**：iOS 14+ 首次访问局域网需要用户授权（弹窗文案来自 `NSLocalNetworkUsageDescription`）。拒绝后局域网请求全部失败，需引导用户去系统设置放行。
+
+**构建**（macOS + Xcode，Windows/Linux 无法构建 iOS）：
+
+```bash
+cd dsh-mobile-app
+flutter pub get                               # 插件走 Swift Package Manager，无需 pod install
+flutter analyze
+flutter build ios --release --no-codesign     # 验证构建；产物 build/ios/iphoneos/Runner.app
+flutter build ios --simulator --debug         # 模拟器版，用于冒烟
+```
+
+- iOS 工程：Swift Package Manager（`ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage` + Xcode 工程内的 local package 引用），**没有 Podfile**；
+- Info.plist 权限/配置：`NSCameraUsageDescription`、`NSPhotoLibraryUsageDescription`、`NSLocalNetworkUsageDescription`、`NSAppTransportSecurity`（`NSAllowsArbitraryLoads=true`）、`CFBundleDocumentTypes`（md/txt/docx/xlsx）、`UIFileSharingEnabled`、`LSSupportsOpeningDocumentsInPlace`；
+- 签名安装：Xcode 打开 `ios/Runner.xcworkspace` → Signing & Capabilities 选自己的 Team；
+- CI（GitHub Actions macOS runner）：analyze / 全量测试 / release 构建 / 模拟器冒烟/集成测试，证据与取回方式见 [docs/ios-ci.md](ios-ci.md)。
+
+**未覆盖 / 需真机验证**：相机扫码真机链路、真机局域网/组网直连、iPad 布局、真机启动耗时与滚动帧率（本期无 iPhone 真机，CI 为 macOS 模拟器；证据口径见交接报告，**不承诺**帧率/毫秒级性能数字）。
 
 ## 5. 已知问题清单（发布时如实告知）
 
@@ -121,6 +157,10 @@ App 为 Flutter 原生 APK（`com.dsh.remote`），渲染后端为 **Impeller（
 | 11 | 与 dsh-web 移动端远程（`@linxin666/dsh-remote-web-ui`）同装冲突 | 两者抢 `/m` 路由前缀（对方写死不可配），可能异常/崩溃 | 本插件 `path` 改 `/mr` 等非 `/m` 单段即可共存（App 自动适配，无需重装）；详见 FAQ |
 | 12 | 手机在线时桌面端不弹审批/问询框（v3.1.2，issue #9） | 桌面用户无法在 PC 审批/应答（只能手机答或 120s fail-close） | **v3.1.3 修复**：默认 `approvalMode: both` 双端同卡、先答生效（0.1.2-rc.1+）；旧宿主/历史版本可用 `approvalMode: mobile \| desktop` 明确策略 |
 | 13 | `approvalMode: both` 依赖内核 `$events` 通道 | 旧宿主（0.1.1-rc.2 及更早）无法双端同卡 | 自动降级 mobile 并写日志；诊断 `notes` 可查 |
+| 14 | iOS 无系统悬浮球（平台限制） | 无法从其他 App 上直接弹面板；后台提醒只能靠推送桥 | 已显式降级：iOS 隐藏入口 + 设置页说明；Bark 推送不受影响（§4） |
+| 15 | iOS App 退后台会被挂起，SSE 断开 | 后台期间收不到实时流；回前台自动重连补拉 | 设计如此（iOS 无后台常驻）；提醒走推送桥（§4） |
+| 16 | iOS 无 App 内自更新 | 无法像 Android 一样 App 内升级 | 升级走 TestFlight / App Store；更新入口在 iOS 隐藏（§4） |
+| 17 | iOS 首次局域网连接可能失败一次 | 本地网络权限弹窗未决/被拒时系统可能先拒绝一次 | App 自动退避重试；仍失败则引导到系统设置放行（§4） |
 
 ## 6. 内置常量与"写死"数据速查
 
@@ -141,3 +181,21 @@ App 为 Flutter 原生 APK（`com.dsh.remote`），渲染后端为 **Impeller（
 - 干净克隆无 key.properties 时自动回退 debug 签名（仅自用可安装；商店/公开分发必须自建 keystore）。
 - 自建方法见 `dsh-mobile-app/README.md`「构建」一节。
 - ⚠ 更换签名 = 新应用：用户需卸载重装并重新扫码。
+- **iOS**：需要 Mac + Xcode + Apple 开发者账号——自用可用免费账号侧载（**7 天重签**），公开分发走 **TestFlight / App Store**（需付费开发者账号）。CI 只做 `flutter build ios --release --no-codesign` 的**未签名**构建验证；签名/上传在本地 Xcode 完成。iOS 没有 Android 那种"换 keystore = 换应用"的等价物，商店版本升级由 Apple 统一签名。
+
+## 8. iOS 上架前加固清单（非移植阻塞项）
+
+> 来源：iOS 移植期间的交叉审查（安全/性能）。以下均为**非移植阻塞项**——不影响 iOS 版可用性、不阻塞测试与交付；建议在**公开上架 / 长期维护**前处理，自用与 TestFlight 可先跑。
+
+| # | 发现 | 影响 | 建议 | 阻塞性 |
+|---|---|---|---|---|
+| S1 | 连接目标校验偏弱：二维码内容只做前缀校验；首个探测请求即携带访问口令 | 恶意二维码可把口令发给任意主机；首个探测请求即带凭据 | 连接前弹「确认连接到此地址」；校验 URL scheme（仅 http/https）；探测阶段不带 token | 上架前建议 |
+| S2 | 访问口令明文存 `NSUserDefaults`（SharedPreferences） | 越狱/备份场景可被读取 | 改用 Keychain 存储口令 | 上架前建议 |
+| S3 | 日志文件写在 Documents 且开启 `UIFileSharingEnabled` | 日志（含连接地址等）对「文件」App/分享可见 | 移到 `Library/Caches`，仅导出时分享 | 上架前建议 |
+| S4 | 下载无体积上限 | 大文件下载在 iOS 上可能 OOM 被杀 | 增加上限与提示（与 Android 端额度对齐） | 上架前建议 |
+| S5 | docx/xlsx 解压无大小/条目上限 | 恶意压缩包（zip bomb）可打爆内存 | 解压前限制压缩比/条目数/总字节 | 上架前建议 |
+| P1 | 文档解析在主 isolate | 超大 docx/xlsx 解析时 UI 冻结 | 解析移到 isolate（compute） | 非阻塞 |
+| P2 | 流式回复每个 chunk 全量重新解析 Markdown | 长回复流式时 CPU 占用偏高 | 增量/分片解析或节流 | 非阻塞 |
+| P3 | 本地网络权限被拒后的引导文案偏 Android 措辞 | iOS 用户可能找不到设置入口 | iOS 文案改为「设置 → 隐私与安全性 → 本地网络」 | 非阻塞（建议随下个版本修） |
+
+**补充说明**：ATS 采用 `NSAllowsArbitraryLoads=true`（用户可配置任意 DSH 地址，含局域网/组网/自建 http）。注意 iOS 10+ 若同时声明 `NSAllowsLocalNetworking` 等细粒度键，系统会**忽略** `NSAllowsArbitraryLoads`、只放行本地网络，因此工程中**只保留** `NSAllowsArbitraryLoads`；本地网络隐私权限由 `NSLocalNetworkUsageDescription` 单独声明。公开上架时需在审核备注中说明明文 HTTP 的用途（仅连用户自建服务）。

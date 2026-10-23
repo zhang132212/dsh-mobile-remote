@@ -16,6 +16,7 @@ import '../fmt.dart';
 import '../l10n.dart';
 import '../logger.dart';
 import '../models.dart';
+import '../platform_support.dart';
 import '../store.dart';
 import '../theme.dart';
 import '../toast.dart';
@@ -766,16 +767,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
             DshTile(
               leading: const Icon(Icons.notifications_active_outlined),
               title: L10n.t('余额预警', 'Low-balance alert'),
-              // v2.7.1：副标题动态显示当前阈值
-              subtitle:
-                  L10n.t('余额低于 ¥', 'Remind to top up when balance is below ¥') +
-                  _fmtThreshold(store.balanceThreshold) +
-                  L10n.t(' 时提醒充值（点此修改）', ' — tap to change'),
-              trailing: DshSwitch(
-                value: store.balanceAlert,
-                onChanged: (v) => store.setBalanceAlert(v),
-              ),
-              onTap: _pickThreshold,
+              // iOS 没有系统悬浮球（后台 30 分钟自查/亮起依赖它），余额预警弱化为
+              // 「打开 App/设置时检查一次」——按 cross-review C5/B- 显式降级：隐藏开关 + 说明。
+              subtitle: DshPlatform.isIOS
+                  ? L10n.t(
+                      'iOS 无系统悬浮球：仅在打开 App/设置时检查余额；后台提醒请配置电脑端 Bark 推送',
+                      'No system bubble on iOS: balance is only checked while the app is open; configure Bark push on the PC for background alerts',
+                    )
+                  // v2.7.1：副标题动态显示当前阈值
+                  : L10n.t('余额低于 ¥', 'Remind to top up when balance is below ¥') +
+                      _fmtThreshold(store.balanceThreshold) +
+                      L10n.t(' 时提醒充值（点此修改）', ' — tap to change'),
+              trailing: DshPlatform.isIOS
+                  ? DshTag(
+                      label: L10n.t('不可用', 'Unavailable'),
+                      dense: true,
+                      color: c.caption,
+                    )
+                  : DshSwitch(
+                      value: store.balanceAlert,
+                      onChanged: (v) => store.setBalanceAlert(v),
+                    ),
+              onTap: DshPlatform.isIOS ? null : _pickThreshold,
             ),
           ],
         ),

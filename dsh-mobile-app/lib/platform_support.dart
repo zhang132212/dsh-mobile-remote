@@ -166,25 +166,44 @@ class FileBridge {
   }
 }
 
-/// 外部文档「同一次投递」去重（cross-review F3）。
+/// 外部文档「同一次投递」去重（cross-review F3 + C3）。
 ///
-/// 背景：原生侧 docDelivered 已保证同一次投递只上报一次（事件推送 openDocument 与
-/// 首帧 getIncomingFile 不会双报），因此 Dart 侧**不能再按 5 秒时间窗去重**——
-/// 那会把「打开文档 → 返回 → 马上再打开同一文件」这种合法操作静默吞掉（无提示）。
-///
-/// 这里只按原生**可选**携带的 deliveryId 做精确去重：id 相同 = 同一次投递的重复回调，
-/// 忽略；无 deliveryId（当前 iOS/Android 契约）→ 一律放行，去重由原生负责。
+/// 原生（T2，v4 起）给每份新收到的外部文档生成 UUID `deliveryId`，并同时挂在
+/// **openDocument 事件 arguments** 与 **getIncomingFile 返回 Map** 顶层——同一份
+/// 暂存文档两条路径的 id 相同。因此：
+///   · 有 deliveryId → 按 id 精确去重（同一次投递只开一次；不同 id 正常打开，
+///     用户连续打开两个同名文件不会被误吞）；
+///   · 无 deliveryId（Android 旧原生 / 未升级端）→ 回退「同名同大小 + 1s 短窗口」，
+///     只挡「事件推送 + 首帧拉取」这种同一时刻的双路径重复（恢复删掉的 5s 窗口防护，
+///     但窗口缩短到 1s，避免再次吞掉合法的二次打开）。
 class IncomingDocDeduper {
   String? _lastAcceptedDeliveryId;
+  String? _lastSignature;
+  DateTime _lastAcceptedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// 返回 true = 应处理本次投递；false = 同一次投递的重复回调（或参数非法）。
-  bool shouldAccept(dynamic args) {
+  /// [now] 仅测试用：注入时间，避免用例依赖真实时钟。
+  bool shouldAccept(dynamic args, {DateTime? now}) {
     if (args is! Map) return false;
     final id = args['deliveryId'];
     if (id is String && id.isNotEmpty) {
       if (id == _lastAcceptedDeliveryId) return false;
       _lastAcceptedDeliveryId = id;
+      return true;
     }
-    return true;
+    // 无 deliveryId：短窗口兜底（事件推送与首帧拉取几乎同时到达）。
+    final name = args['name'];
+    if (name is! String || name.isEmpty) return true; // 缺字段交给主流程判定
+    final bytes = args['bytes'];
+    final size = bytes is List ? bytes.length : -1;
+    final signature = '$name:$size';
+    final ts = now ?? DateTime.now();
+    final duplicate = signature == _lastSignature &&
+        ts.difference(_lastAcceptedAt) < const Duration(seconds: 1);
+    if (!duplicate) {
+      _lastSignature = signature;
+      _lastAcceptedAt = ts;
+    }
+    return !duplicate;
   }
 }

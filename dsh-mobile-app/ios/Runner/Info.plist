@@ -81,11 +81,14 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<!-- ATS：本 App 允许用户自行填写任意 DSH 服务地址（局域网 IP、FRP/Tailscale、自建公网 http），
+	     因此放行任意加载；局域网直连的隐私授权由下方 NSLocalNetworkUsageDescription 负责。
+	     注意：iOS 10+ 上若同时设置 NSAllowsLocalNetworking，NSAllowsArbitraryLoads 会被忽略
+	     （Apple 文档：AllowsArbitraryLoads 在 AllowsLocalNetworking 存在时不生效），故刻意不设该键。
+	     上架 App Store 时需在审核备注说明：明文 HTTP 仅用于用户主动配置的私有服务地址，无内置明文第三方端点。 -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>

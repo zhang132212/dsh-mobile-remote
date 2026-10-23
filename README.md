@@ -1,6 +1,6 @@
 # DSH Remote（dsh-mobile-remote）
 
-> 把 DeepSeek Harness 变成随身控制台：**手机远程操作电脑上的 agent** —— 发消息派活、看进度、收通知、审批决策、管理会话。电脑端跑着，人不在电脑前也能全程操作。（App 目前为 **Android 端**；**iOS 端未开发**——开发者无苹果设备，欢迎社区贡献，见 docs/09 §4）
+> 把 DeepSeek Harness 变成随身控制台：**手机远程操作电脑上的 agent** —— 发消息派活、看进度、收通知、审批决策、管理会话。电脑端跑着，人不在电脑前也能全程操作。（App 支持 **Android 7.0+ / iOS 15.0+**；iOS 平台差异与验证见 [docs/09 §4](docs/09-compatibility.md)）
 
 ## 截图
 
@@ -57,7 +57,7 @@
 - 🏢 **模型提供商互通**：PC 端「设置 → 模型」与手机同一配置通道——37 个内置提供商（anthropic / openai / google / groq 等）手机可见可配（baseURL + API Key 即激活），模型选择器按提供商分组，设置页「模型提供商」可搜索/编辑/探测模型
 - 👀 **过程可见性**：活动条（思考中 / 正在调用工具实时状态行）+ 可折叠思考面板（默认只显示状态）
 - 🛠️ **会话工具**：运行中的后台任务实时卡片（可取消）+ 三页签弹层——任务 / 子代理（查看+中断）/ 目标（查看、创建、暂停、继续、标记完成，与 PC 端 goal 服务同源）
-- 🫧 **悬浮球**：透明鲸鱼常驻桌面——空闲灰 / 有任务·通知·余额低亮蓝+红点；单击迷你面板（运行中会话 / 通知 / 打开 App / 去充值），拖动贴边 5 秒自动缩进，双击开 App，长按退出；错过的通知也会补提示（气泡/横幅）
+- 🫧 **悬浮球**：透明鲸鱼常驻桌面——空闲灰 / 有任务·通知·余额低亮蓝+红点；单击迷你面板（运行中会话 / 通知 / 打开 App / 去充值），拖动贴边 5 秒自动缩进，双击开 App，长按退出；错过的通知也会补提示（气泡/横幅）（Android；iOS 无系统悬浮球，后台提醒改用 Bark 推送，见 docs/09 §4）
 - 💾 **体验打磨**：Agent 状态 bootstrap 同步（按钮/活动条即时反映 PC 状态）、下拉刷新收集地址（蒲公英/Tailscale 自动进候选）、聊天草稿保留（退出重进自动恢复）、首页改版（官方 logo / 新欢迎语 / 最近会话卡片滑动）、语言切换（中/英）
 - 📶 **扫码连接**：桌面 dsh 设置页出现「连接移动端设备」二维码 → 手机 App 扫码即连（免输 IP/口令）
 - 🩺 **环境诊断**：一键查看当前环境各项能力（含问询/审批桥状态），升级/排障一目了然
@@ -68,7 +68,7 @@
 
 | 形态 | 说明 |
 |---|---|
-| **原生 App（安卓，推荐）** | `dsh-mobile-app/` 构建 APK 安装；扫码连接、原生体验、系统通知 |
+| **原生 App（Android / iOS，推荐）** | `dsh-mobile-app/`：Android 安装 APK；iOS 15.0+ 经 TestFlight / App Store，或自行签名构建（需 Mac + Xcode）。扫码连接、原生体验；iOS 的系统通知走 Bark 推送桥 |
 
 ## 微信入口（可选）：dsh-im
 
@@ -205,7 +205,7 @@ pushUrls:
 
 ## 手机使用
 
-0. **下载 App**：[GitHub Releases](https://github.com/zhang132212/dsh-mobile-remote/releases/latest) 下载 Release 附件中的 `.apk` 安装（或按 dsh-mobile-app/README 自行构建）
+0. **安装 App**：Android 从 [GitHub Releases](https://github.com/zhang132212/dsh-mobile-remote/releases/latest) 下载 Release 附件的 `.apk` 安装；iOS 15.0+ 经 TestFlight / App Store，或按 dsh-mobile-app/README 自行签名构建（自用免费账号侧载 7 天需重签）
 1. 与电脑同一 WiFi；**人不在家**用蒲公英组网等虚拟组网方案（已实测，见 docs/06 §5，App 自动切换地址）
 2. 打开 App →「扫码连接」对准桌面 dsh 设置页二维码（或手动输地址+口令）
 3. 首页直接发消息派活；对话页实时流式回复；通知页看完成/提问/失败
@@ -228,7 +228,8 @@ pushUrls:
 - 归档（archive）会话与 PC 端同源显示，行为一致。
 - 问询/审批弹窗链路随内核版本走对应机制：0.1.2-rc.1+ 为 Agent 作用域瀑布 + 插件 answerer（`both` 双端呈现走内核 `$events` 远程事件通道，与 PC 端 GUI 同通道）；更早内核走 `apiProxy` 帧桥（私有协议，未来大版本可能断桥，插件干净降级、随版本更新恢复）。手机不弹时先跑环境诊断看 `approvalMode`/`remoteEvents`（见 FAQ「问询/审批弹窗类」）。
 - 通知删除只清记录不"静音"：同会话同类新事件仍会产生新通知。
-- App 构建签名：正式分发须自建 keystore（换签名 = 换应用，用户需重装重扫）；详见 docs/06 §8.2 与 docs/09 §6。
+- App 构建签名：正式分发须自建 keystore（换签名 = 换应用，用户需重装重扫）；详见 docs/06 §8.2 与 docs/09 §6。iOS 签名/分发见 docs/09 §4 与 §7。
+- iOS 平台差异（无系统悬浮球、后台不常驻、无 App 内自更新、文件保存到 App 文稿、首次局域网连接需允许「本地网络」）是平台限制，已显式降级并给出提示，详见 docs/09 §4。
 - **与 dsh-web 的移动端远程（`@linxin666/dsh-remote-web-ui`）同装会冲突**：对方把手机页面/API 整体写死在 `/m` 前缀（不可配置），本插件默认也挂在 `/m`——两者抢同一路由前缀可能导致异常/崩溃。共存方法：给本插件配 `path: /mr`（任意非 `/m` 单段）并重启 DSH，手机 App 自动适配无需重装（详见 FAQ「设备/兼容类」）。
 
 ## 环境诊断
@@ -238,7 +239,7 @@ pushUrls:
 ## 兼容性
 
 - **dsh 版本**：v3.1.2/v3.1.3 基线为 **`0.1.2-rc.1` 服务包 = DSH Desktop v2.0.5**（approval/request 瀑布 answerer、`$events` 远程事件双端审批、RPC 网关直通、桌面浏览器门禁适配）；v3.0.0–v3.1.1 基线 **`0.1.1-rc.2` = DSH Desktop v2.0.2**（`commands.execute` 四参、桌面版强制回环 → LAN 桥）。更低版本按功能降级，服务依赖与降级行为详见 **[docs/09-compatibility.md](docs/09-compatibility.md)**
-- **平台（App）**：Android 7.0+ 全品牌（渲染 Impeller 自动回退；实测小米 17 Pro Max）；**iOS 未开发**（开发者无苹果设备，Dart 代码已平台无关，欢迎社区贡献，见 docs/09 §4）
+- **平台（App）**：Android 7.0+ 全品牌（渲染 Impeller 自动回退；实测小米 17 Pro Max）；**iOS 15.0+**（Impeller 为唯一渲染后端；构建走 Swift Package Manager / UIScene，平台差异见 docs/09 §4）
 - **平台（桌面）**：Windows/macOS；命令行 dsh web 与桌面端均支持（纯 headless 形态插件静默无操作）
 - **个性化**：模型/权限/Agent 预设动态读取 PC 端真实目录，用户自定义自动出现；自定义动作经 `mobileActions` 注册自动上架
 - **深度魔改 web profile**（禁用标准服务）：对应功能自动降级，不崩溃——诊断页可查每个服务状态

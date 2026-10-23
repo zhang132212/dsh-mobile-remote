@@ -1,15 +1,13 @@
-// issue #13 回归：eventsRaw() 的「取消窗口」连接释放语义。
+// issue #13 回归：eventsRaw() 的「取消窗口」客户端连接释放语义。
 //
-// 三条用例守护：
-//   1) 正常路径：响应到达后取消 → 连接必须释放；
-//   2) 取消窗口：响应到达前取消（resume/switchBase/disposeBridge 的动作）
-//      → 晚到响应必须被消费并释放（api.dart eventsRaw 的 cancelled 守卫）；
-//   3) 窗口内连续重建 3 次 → 不得残留半开 socket。
+// 判据（cross-review 后修正）：旧版数服务端 HttpServer.connectionsInfo()，但 FakeSse
+// 从不 close 自己的 response —— 客户端 force close 只发 FIN（半关闭），Darwin 的
+// HttpServer 仍会把这个 socket 计为 active，于是 macOS 上「真修复也红」（v2/v3 实测
+// active=1 idle=0 closing=0），而 Windows 立刻归零。判据本身在 Darwin 上不可靠。
 //
-// 断言方式：cancel 后**轮询等待**服务端连接数归零（真实时间，超时才失败），
-// 不用固定 sleep —— macOS CI（Xcode 16.4 runner）上 FIN/事件循环回收慢于 Windows，
-// 固定 2~3s 等待会假阳性（run 39981868876 曾 3 连红，而前一轮同文件全绿）。
-// 超时失败信息带 active/idle/closing 计数，便于区分「只是慢」与「真泄漏」。
+// 现在改成 **raw ServerSocket** 手写 HTTP/1.1 chunked 响应，并用「服务端 read 到 EOF」
+//（客户端确实关闭了 socket）作为判据：read 结束即 closed++，不依赖 HttpServer 的半关闭
+// 记账。EOF 语义 Windows/macOS 一致，且正对应用户可感的「连接被释放」。
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -19,46 +17,92 @@ import 'package:dsh_mobile_app/api.dart';
 
 class FakeSse {
   FakeSse._(this.server);
-  final HttpServer server;
-  int responses = 0;
+
+  final ServerSocket server;
+  int responses = 0; // accept 到的 SSE 请求数
+  int closed = 0; // 服务端 read 到 EOF（客户端已关闭）的连接数
+  final List<Socket> _sockets = [];
   final List<Timer> _timers = [];
 
-  static Future<FakeSse> start({required Duration beforeRespond}) async {
-    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final self = FakeSse._(server);
-    server.listen((req) async {
-      self.responses++;
-      await Future<void>.delayed(beforeRespond); // 慢响应窗口（真机：握手/Tailscale 隧道建立）
-      final res = req.response
-        ..statusCode = HttpStatus.ok
-        ..headers.contentType = ContentType('text', 'event-stream')
-        ..bufferOutput = false; // 必须！默认 true 时帧根本不上线
-      res.done.catchError((_) {});
-      void write(String s) {
-        try {
-          res.add(utf8.encode(s));
-          res.flush().catchError((_) {});
-        } catch (_) {}
-      }
+  int get port => server.port;
+  int get activeConnections => _sockets.length - closed;
 
-      write('data: {"type":"hello","capabilities":{}}\n\n');
-      self._timers
-          .add(Timer.periodic(const Duration(milliseconds: 250), (_) => write(': ping\n\n')));
+  static Future<FakeSse> start({required Duration beforeRespond}) async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final self = FakeSse._(server);
+    server.listen((socket) {
+      self.responses++;
+      self._sockets.add(socket);
+      self._serve(socket, beforeRespond);
     });
     return self;
   }
 
-  int get openConnections => server.connectionsInfo().total;
+  Future<void> _serve(Socket socket, Duration beforeRespond) async {
+    var clientGone = false;
+    socket.listen(
+      (_) {}, // 消费客户端请求字节
+      onDone: () {
+        if (!clientGone) {
+          clientGone = true;
+          closed++;
+        }
+      },
+      onError: (_) {
+        if (!clientGone) {
+          clientGone = true;
+          closed++;
+        }
+      },
+      cancelOnError: true,
+    );
+    socket.done.catchError((_) {});
+    await Future<void>.delayed(beforeRespond); // 慢响应窗口（真机：握手/Tailscale 隧道建立）
+    if (clientGone) return; // 客户端已关闭：不再写
+    try {
+      socket.add(utf8.encode(
+        'HTTP/1.1 200 OK\r\n'
+        'Content-Type: text/event-stream; charset=utf-8\r\n'
+        'Cache-Control: no-cache\r\n'
+        'Transfer-Encoding: chunked\r\n'
+        '\r\n',
+      ));
+      _writeChunk(socket, 'data: {"type":"hello","capabilities":{}}\n\n');
+      await socket.flush();
+      _timers.add(Timer.periodic(const Duration(milliseconds: 250), (_) {
+        if (clientGone) return;
+        try {
+          _writeChunk(socket, ': ping\n\n');
+          socket.flush().catchError((_) {});
+        } catch (_) {}
+      }));
+    } catch (_) {
+      // 客户端在写响应前关闭：忽略
+    }
+  }
+
+  /// 写一个 HTTP/1.1 chunk（长度按 UTF-8 字节数）。
+  void _writeChunk(Socket socket, String payload) {
+    final bytes = utf8.encode(payload);
+    socket.add(utf8.encode('${bytes.length.toRadixString(16)}\r\n'));
+    socket.add(bytes);
+    socket.add(utf8.encode('\r\n'));
+  }
 
   Future<void> stop() async {
     for (final t in _timers) {
       t.cancel();
     }
-    await server.close(force: true);
+    for (final s in _sockets) {
+      try {
+        s.destroy();
+      } catch (_) {}
+    }
+    await server.close();
   }
 }
 
-/// 先等「服务端确实收到了 [atLeast] 个请求」，避免请求还没发出就轮询到 0 的假通过。
+/// 先等「服务端确实 accept 了 [atLeast] 个请求」，避免还没连上就判过。
 Future<void> waitForResponses(
   FakeSse s,
   int atLeast, {
@@ -72,63 +116,57 @@ Future<void> waitForResponses(
   fail('等待服务端收到 $atLeast 个请求超时（实际 responses=${s.responses}）');
 }
 
-/// 轮询等待「服务端连接全部回收」，直到 [FakeSse.openConnections] == 0 或超时。
+/// 轮询等待「客户端已关闭 [atLeast] 条连接」（服务端 read 到 EOF）。
 ///
-/// 旧实现是固定 `Future.delayed(2~3s)` 后直接断言 0：Windows 上够用，但 macOS CI
-/// （Xcode 16.4 runner）事件循环 / FIN 回收更慢，固定等待会假阳性（CI 首跑 3 连红）。
-/// 这里用真实时间轮询（非 fake async），超时才失败，并带上最后一次连接统计，
-/// 便于区分「只是慢」与「真泄漏」。
-Future<void> waitNoResidualConnections(
-  FakeSse s, {
-  // macOS runner 上 FIN/事件循环回收明显慢于 Windows：给到 15s 仍失败才是真泄漏。
+/// 为什么不用 HttpServer.connectionsInfo().total：Darwin 上客户端 FIN 是半关闭，
+/// 服务端不 close response 就会继续把连接记为 active（与客户端是否释放无关）。
+Future<void> waitForClientCloses(
+  FakeSse s,
+  int atLeast, {
   Duration timeout = const Duration(seconds: 15),
   required String reason,
 }) async {
   final deadline = DateTime.now().add(timeout);
-  var info = s.server.connectionsInfo();
   while (DateTime.now().isBefore(deadline)) {
-    info = s.server.connectionsInfo();
-    if (info.total == 0) return;
+    if (s.closed >= atLeast) return;
     await Future<void>.delayed(const Duration(milliseconds: 100));
   }
   fail(
-    '$reason：等待 ${timeout.inSeconds}s 后仍有 ${info.total} 条连接未释放'
-    '（active=${info.active} idle=${info.idle} closing=${info.closing} '
-    'responses=${s.responses}）——若持续非 0 则是真泄漏，不是慢',
+    '$reason：等待 ${timeout.inSeconds}s 后仅 ${s.closed}/$atLeast 条连接被客户端关闭'
+    '（responses=${s.responses} active=${s.activeConnections}）——'
+    'active 长期非 0 说明客户端没有真正释放 socket',
   );
 }
 
 Api mkApi(FakeSse s) => Api()
-  ..baseUrl = 'http://127.0.0.1:${s.server.port}'
+  ..baseUrl = 'http://127.0.0.1:${s.port}'
   ..token = '';
 
 void main() {
-  test('对照：响应到达后取消（正常路径）→ 连接释放', () async {
+  test('对照：响应到达后取消（正常路径）→ 客户端关闭连接', () async {
     final s = await FakeSse.start(beforeRespond: Duration.zero);
     addTearDown(s.stop);
     final sub = mkApi(s).eventsRaw().listen((_) {}, onError: (_) {});
     await Future<void>.delayed(const Duration(milliseconds: 600));
     await sub.cancel();
-    await waitNoResidualConnections(s, reason: '正常取消必须释放连接');
+    await waitForClientCloses(s, 1, reason: '正常取消必须释放连接');
     // ignore: avoid_print
-    print('对照: responses=${s.responses} 残留连接=${s.openConnections}');
-    // flutter_test 单测默认 30s 超时；这里最长轮询 15s，显式给到 90s 留足余量（CI 硬门禁）。
+    print('对照: responses=${s.responses} closed=${s.closed}');
   }, timeout: Timeout(const Duration(seconds: 90)));
 
-  test('取消窗口：响应到达前取消（resume/switchBase/disposeBridge 的动作）', () async {
+  test('取消窗口：响应到达前取消 → 客户端必须关闭连接（不留半开 socket）', () async {
     final s = await FakeSse.start(beforeRespond: const Duration(milliseconds: 900));
     addTearDown(s.stop);
     final sub = mkApi(s).eventsRaw().listen((_) {}, onError: (_) {});
     await Future<void>.delayed(const Duration(milliseconds: 150));
-    await sub.cancel(); // bodySub 仍为 null → onCancel 什么也没做，等晚到响应落地
-    await waitForResponses(s, 1); // 先确认请求已到达服务端（否则可能「还没发就连 0」假通过）
-    await waitNoResidualConnections(s,
-        reason: '晚到的响应必须被消费并释放（api.dart eventsRaw 的已取消守卫）');
+    await sub.cancel();
+    await waitForResponses(s, 1); // 确认请求已到达服务端（否则「没连上」不能算通过）
+    await waitForClientCloses(s, 1, reason: '取消窗口内客户端也必须关闭连接');
     // ignore: avoid_print
-    print('取消窗口: responses=${s.responses} 残留连接=${s.openConnections}');
+    print('取消窗口: responses=${s.responses} closed=${s.closed}');
   }, timeout: Timeout(const Duration(seconds: 90)));
 
-  test('窗口内连续重建 3 次 → 泄漏连接线性累积', () async {
+  test('窗口内连续重建 3 次 → 3 条连接全部被客户端关闭', () async {
     final s = await FakeSse.start(beforeRespond: const Duration(milliseconds: 700));
     addTearDown(s.stop);
     final a = mkApi(s);
@@ -137,10 +175,9 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 120));
       await sub.cancel();
     }
-    // 3 条窗口内连接都要回收（同样用真实时间轮询，等 FIN 落地而不是固定等待）。
-    await waitForResponses(s, 3); // 3 次请求都已到达服务端，再等连接归零
-    await waitNoResidualConnections(s, reason: '每次窗口内重建都不该留下半个 socket');
+    await waitForResponses(s, 3); // 3 次请求都已到达服务端
+    await waitForClientCloses(s, 3, reason: '每次窗口内重建都不该留下半个 socket');
     // ignore: avoid_print
-    print('重连 x3: responses=${s.responses} 残留连接=${s.openConnections}');
+    print('重连 x3: responses=${s.responses} closed=${s.closed}');
   }, timeout: Timeout(const Duration(seconds: 90)));
 }

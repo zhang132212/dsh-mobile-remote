@@ -21,8 +21,9 @@ mkdir -p "$WORK"
 
 SKIP_GLOBS="${ARTIFACT_SKIP_GLOBS:-}"   # 空格分隔的 glob，例如 "*.zip *.ips"
 TOTAL="$(find "$CI_OUT" -type f 2>/dev/null | wc -l | tr -d ' ')"
-# -print0 + read -d '' 处理带空格的文件名（bash 3.2 支持）
-find "$CI_OUT" -type f -print0 2>/dev/null | while IFS= read -r -d '' src; do
+# 注意：macOS 自带 bash 3.2 **不支持** read -d（bash 4+），这里用按行读；
+# 文件名里的空格没问题（IFS= read 读整行），仅理论上不支持含换行的文件名。
+find "$CI_OUT" -type f -print 2>/dev/null | while IFS= read -r src; do
   rel="${src#$CI_OUT/}"
   skip=""
   if [ -n "$SKIP_GLOBS" ]; then

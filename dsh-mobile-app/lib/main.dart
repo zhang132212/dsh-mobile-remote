@@ -2,6 +2,7 @@
 // 原生 App：抽屉导航（首页/会话/设置）+ 通知 + 连接配置 + 扫码连接。
 // 界面与功能对齐网页端 dsh-mobile-remote（DeepSeek 配色，Claude 式布局）。
 import 'dart:async';
+import 'dart:io' show HttpException, SocketException;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -138,8 +139,9 @@ class _DshAppState extends State<DshApp> {
     return null;
   }
 
-  /// 外部文档「同一次投递」去重（cross-review F3：不再用 5s 时间窗，
-  /// 避免吞掉「打开→返回→马上再打开同一文件」；同一次投递的去重由原生 docDelivered 负责）。
+  /// 外部文档「同一次投递」去重（cross-review F3 + C3）：
+  /// 原生带 deliveryId 时按 id 精确去重（事件推送 + 首帧拉取只开一次）；
+  /// 无 id（Android 旧原生）时回退同名同大小 + 1s 短窗口。详见 IncomingDocDeduper。
   final IncomingDocDeduper _docDeduper = IncomingDocDeduper();
 
   /// 冷启动兜底：原生已暂存但事件早于 handler 注册时，首帧后主动取一次。
@@ -170,17 +172,25 @@ class _DshAppState extends State<DshApp> {
     AppLog.instance.log('[doc] 收到外部文档 name=$name '
         'bytes=${(args['bytes'] as List?)?.length ?? 0} err=${args['error']}');
 
-    // 原生读文件失败（权限不足 / 分享的临时 uri 过期 / 空文件）——必须给用户一个说法。
-    // 静默什么都不做会让「用 DSH Remote 打开」看起来像坏了（模拟器实测踩中这个体验坑）。
+    // 原生读文件失败（权限不足 / 分享的临时 uri 过期 / 空文件 / 超过 24MB 上限）
+    // ——必须给用户一个可操作的归因，不能统一说成「权限不足/链接失效」（cross-review C6）。
     final err = args['error'];
     if (err != null) {
+      final code = err is String ? err : err.toString();
+      final reason = switch (code) {
+        'too-large' => L10n.t('文件超过 24MB 上限', 'the file exceeds the 24MB limit'),
+        'empty' => L10n.t('文件为空', 'the file is empty'),
+        'read-failed' => L10n.t('无法读取（可能无权限或文件已失效）',
+            'cannot read it (permission denied or unavailable)'),
+        _ => L10n.t('权限不足或链接已失效', 'permission denied or the link has expired'),
+      };
       final msgr = _rootMessenger();
       if (msgr != null) {
         showToastAt(
           msgr,
           L10n.t(
-            '无法读取该文件${name is String ? '（$name）' : ''}：权限不足或链接已失效',
-            'Cannot read the file${name is String ? ' ($name)' : ''}: permission denied or link expired',
+            '无法打开该文件${name is String ? '（$name）' : ''}：$reason',
+            'Cannot open the file${name is String ? ' ($name)' : ''}: $reason',
           ),
         );
       }
@@ -827,6 +837,7 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
   final _tokenCtrl = TextEditingController();
   String _status = '';
   bool _busy = false;
+  bool _failed = false;
 
   @override
   void initState() {
@@ -835,6 +846,35 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
     if (api.token.isNotEmpty) _tokenCtrl.text = api.token;
   }
 
+  /// 首连失败提示：iOS 首次连接最大的坑是「本地网络」权限（Android 无此概念）。
+  /// 只有 iOS 的网络类错误才给本地网络归因；其它错误给通用检查建议（cross-review C1）。
+  String _connectFailureHint(Object error) {
+    if (DshPlatform.isIOS) {
+      final networkError = error is SocketException ||
+          error is HttpException ||
+          error is TimeoutException;
+      if (networkError) {
+        return L10n.t(
+          '\n若系统询问「查找并连接本地网络上的设备」请选择「允许」；若已拒绝，请到 '
+          '设置 → 隐私与安全性 → 本地网络 打开 DSH Remote，然后点「重试」。',
+          '\nIf iOS asks for local network access, allow it. If you denied it, open '
+          'Settings → Privacy & Security → Local Network and enable DSH Remote, then tap Retry.',
+        );
+      }
+      return L10n.t(
+        '\n请检查地址与访问口令；若系统询问本地网络权限请选择「允许」。',
+        '\nCheck the address and token; allow local network access if iOS asks.',
+      );
+    }
+    // Android 原文案保持不变（MiUI 智能网络/蜂窝分流表现为超时或 404）。
+    return L10n.t(
+      '；请确认手机与电脑在同一 Wi-Fi，并关闭手机流量/智能网络后重试',
+      '; make sure the phone is on the same Wi-Fi as the PC, and turn off mobile data / smart network switch',
+    );
+  }
+
+  /// 首次连接。iOS 网络类失败会自动重试一次（1.5s）：首次局域网访问时系统弹窗
+  /// 「未决」阶段可能先失败一次，允许后重试即可成功；仍失败则展示本地网络引导 + 重试按钮。
   Future<void> _connect() async {
     var base = _baseCtrl.text.trim();
     if (!base.startsWith('http')) base = 'http://$base';
@@ -842,26 +882,45 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
     if (base.endsWith('/m')) base = base.substring(0, base.length - 2);
     setState(() {
       _busy = true;
+      _failed = false;
       _status = L10n.t('连接中…', 'Connecting…');
     });
-    try {
-      // v3.0.0：探测客户端与 save() 同源的地址/路径规范化（防 /m 重复拼接 404）
-      final probe = Api.forProbe(base, _tokenCtrl.text.trim());
-      await probe.getJson('/api/bootstrap');
-      await api.save(base: base, token: _tokenCtrl.text.trim());
-      if (!mounted) return;
-      setState(() => _status = L10n.t('✅ 已连接', '✅ Connected'));
-      widget.onConnected();
-    } catch (e) {
-      if (!mounted) return;
-      // v3.0.0：网络原因引导（MiUI 智能网络/蜂窝把局域网流量分流时会表现为超时或 404）
-      final hint = L10n.t(
-          '；请确认手机与电脑在同一 Wi-Fi，并关闭手机流量/智能网络后重试',
-          '; make sure the phone is on the same Wi-Fi as the PC, and turn off mobile data / smart network switch');
-      setState(() => _status = '${L10n.t('连接失败：', 'Connection failed:')}$e$hint');
-    } finally {
-      if (mounted) setState(() => _busy = false);
+    Object? lastError;
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      try {
+        // v3.0.0：探测客户端与 save() 同源的地址/路径规范化（防 /m 重复拼接 404）
+        final probe = Api.forProbe(base, _tokenCtrl.text.trim());
+        await probe.getJson('/api/bootstrap');
+        await api.save(base: base, token: _tokenCtrl.text.trim());
+        if (!mounted) return;
+        setState(() {
+          _status = L10n.t('✅ 已连接', '✅ Connected');
+          _busy = false;
+          _failed = false;
+        });
+        widget.onConnected();
+        return;
+      } catch (e) {
+        lastError = e;
+        final retryable = DshPlatform.isIOS &&
+            attempt == 1 &&
+            (e is SocketException || e is HttpException || e is TimeoutException);
+        if (!retryable) break;
+        if (!mounted) return;
+        setState(() => _status = L10n.t(
+            '连接失败，正在自动重试…（请允许本地网络访问）',
+            'Connection failed, retrying… (please allow local network access)'));
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        if (!mounted) return;
+      }
     }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _failed = true;
+      _status =
+          '${L10n.t('连接失败：', 'Connection failed:')}$lastError${_connectFailureHint(lastError!)}';
+    });
   }
 
   Future<void> _onScanned(String base, String token) async {
@@ -957,6 +1016,18 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
             ),
             const SizedBox(height: DshSpace.md),
             Text(_status, textAlign: TextAlign.center, style: DshType.xs13.copyWith(color: c.ink2)),
+            // C1：失败后给显式「重试」按钮（iOS 本地网络权限放行后无需重填表单）。
+            if (_failed) ...[
+              const SizedBox(height: DshSpace.md),
+              DshButton(
+                label: L10n.t('重试', 'Retry'),
+                icon: Icons.refresh,
+                variant: DshButtonVariant.outline,
+                size: DshButtonSize.lg,
+                expanded: true,
+                onPressed: _busy ? null : _connect,
+              ),
+            ],
           ],
                 ),
               ),

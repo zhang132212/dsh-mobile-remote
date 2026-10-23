@@ -1,12 +1,12 @@
 # 05 测试用例设计文档 — dsh-mobile-remote
 
 > 版本：v3.2.0（用量与额度见 F-24~F-32，对话时间线见 F-33~F-35；v3.1.1 用例见 F-23） · 配套：03-api.md、04-security.md
-> 环境：Windows + DSH Desktop（desktop profile，内核 0.1.1-rc.2；web profile 亦适用） + Android（DSH Remote App）
+> 环境：Windows + DSH Desktop（desktop profile，内核 0.1.1-rc.2；web profile 亦适用） + Android（DSH Remote App）；**iOS 15.0+ 端同一套用例**（CI 验证见 docs/ios-ci.md，平台差异见 docs/09-compatibility.md §4）
 > 前置：插件已安装并启用（LAN 桥监听 0.0.0.0:3080）；访问口令为安装时生成的随机串（下文 `<TOKEN>`）。
 ## 1. 测试范围与环境
 - 功能：认证、发消息、事件回流、历史、会话、通知、新建会话、目录、默认配置、二维码。
 - 安全：口令校验、Host 校验、loopback 限制。
-- 兼容：Android 深色/浅色主题。
+- 兼容：Android 深色/浅色主题；iOS 15.0+（Impeller 渲染、平台降级项见 docs/09 §4）。
 - 自动化：`tools/e2e-check.mjs`（Node ≥ 20，`DSH_MOBILE_TOKEN` 环境变量）覆盖核心 API 链路。
 ## 2. 功能测试用例
 

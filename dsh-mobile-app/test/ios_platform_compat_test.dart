@@ -15,6 +15,7 @@
 // 因此 Windows 上既有 golden / widget 测试的渲染结果不受影响（iOS 门控不生效）。
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -23,6 +24,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dsh_mobile_app/dsh_kit.dart';
 import 'package:dsh_mobile_app/floating.dart';
 import 'package:dsh_mobile_app/l10n.dart';
+import 'package:dsh_mobile_app/main.dart' show ConnectionSheet;
 import 'package:dsh_mobile_app/platform_support.dart';
 import 'package:dsh_mobile_app/screens/settings_screen.dart';
 import 'package:dsh_mobile_app/store.dart';
@@ -342,6 +344,15 @@ void main() {
       );
       expect(find.text(Floating.unsupportedHint), findsOneWidget);
       expect(find.text('悬浮球操作说明'), findsNothing);
+
+      // B-：iOS 无系统悬浮球 → 余额预警开关一并隐藏（只剩打开 App 时检查一次）。
+      final balanceTile = find.widgetWithText(DshTile, '余额预警');
+      expect(balanceTile, findsOneWidget);
+      expect(
+        find.descendant(of: balanceTile, matching: find.byType(Switch)),
+        findsNothing,
+      );
+      expect(find.textContaining('Bark 推送'), findsWidgets);
     });
 
     testWidgets('iOS：隐藏「检查更新」按钮，显示 App Store 更新说明', (tester) async {
@@ -366,6 +377,58 @@ void main() {
       expect(find.text('悬浮球操作说明'), findsOneWidget);
       expect(find.text(UpdateSupport.unsupportedMessage), findsNothing);
       expect(find.widgetWithText(DshButton, '检查'), findsOneWidget);
+
+      // Android：余额预警开关保持原样（C5/B- 只影响 iOS）。
+      final balanceTile = find.widgetWithText(DshTile, '余额预警');
+      expect(balanceTile, findsOneWidget);
+      expect(
+        find.descendant(of: balanceTile, matching: find.byType(Switch)),
+        findsOneWidget,
+      );
+    });
+  });
+
+  group('主题 · iOS 转场（C2）', () {
+    test('iOS 使用 CupertinoPageTransitionsBuilder（保留边缘右滑返回手势）', () {
+      final theme = DshTheme.light();
+      expect(
+        theme.pageTransitionsTheme.builders[TargetPlatform.iOS],
+        isA<CupertinoPageTransitionsBuilder>(),
+      );
+      if (!Platform.isIOS) {
+        // Android 保持仓库自定义转场（不在本次修改范围）。
+        expect(
+          theme.pageTransitionsTheme.builders[TargetPlatform.android],
+          isNot(isA<CupertinoPageTransitionsBuilder>()),
+        );
+      }
+    });
+  });
+
+  group('连接页 · iOS 本地网络引导（C1）', () {
+    testWidgets('iOS 连接失败：提示本地网络权限 + 出现「重试」按钮', (tester) async {
+      DshPlatform.debugOverrideIsIOS = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: DshTheme.light(),
+          home: Scaffold(body: ConnectionSheet(onConnected: () {})),
+        ),
+      );
+      await tester.pump();
+      await tester.enterText(find.byType(TextField).at(0), 'http://127.0.0.1:1');
+      await tester.enterText(find.byType(TextField).at(1), 'token');
+      await tester.tap(find.text('连接'));
+      await tester.pump();
+      // 测试环境的 HttpClient 固定返回 400：等 probe 失败落地（非网络类错误不触发
+      // iOS 自动重试，直接进入失败分支）。
+      for (var i = 0; i < 40; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        if (find.textContaining('本地网络').evaluate().isNotEmpty) break;
+      }
+      expect(find.textContaining('本地网络'), findsWidgets,
+          reason: 'iOS 失败提示必须包含本地网络权限归因');
+      expect(find.widgetWithText(DshButton, '重试'), findsOneWidget);
     });
   });
 }

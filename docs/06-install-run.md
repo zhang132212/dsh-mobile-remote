@@ -239,7 +239,8 @@ mkcert 192.168.1.100 172.16.x.x # 给电脑的局域网/组网 IP 签证书
 #     tls <生成的 cert.pem> <生成的 key.pem>
 #     reverse_proxy 127.0.0.1:3080
 #   }
-# ③ 把 mkcert 的 CA 根证书传到手机安装（Android：设置 → 安全 → 加密与凭据 → 安装证书）
+# ③ 把 mkcert 的 CA 根证书传到手机安装（Android：设置 → 安全 → 加密与凭据 → 安装证书；
+#    iOS：设置 → 已下载描述文件 → 安装 → 通用 → 关于本机 → 证书信任设置 → 启用完全信任）
 # ④ 启动 caddy，App 手动连接 https://<电脑IP>:3443 + 口令
 ```
 
@@ -254,12 +255,15 @@ mkcert 192.168.1.100 172.16.x.x # 给电脑的局域网/组网 IP 签证书
 2. 从 `package.json` 删除 `dsh-mobile-remote` 依赖并 `corepack pnpm install`。
 3. 重启 DSH（Desktop 或 web）。插件路由、SSE 连接随 fiber dispose 全部释放，桌面 GUI 不受影响。
 
-## 8. Flutter App（dsh-mobile-app，安卓）
+## 8. Flutter App（dsh-mobile-app，Android / iOS）
 
 > 源码：`dsh-mobile-app/` 子目录（独立 Flutter 工程，与插件同仓库发布）。
-### 8.0 安装 App（推荐：直接下载 APK）
+> 平台：**Android 7.0+ / iOS 15.0+**；平台差异（悬浮球/后台/自更新/本地网络权限）见 docs/09-compatibility.md §4。
+### 8.0 安装 App
 
-**无需编译环境**：从 [GitHub Releases](https://github.com/zhang132212/dsh-mobile-remote/releases/latest) 下载 `.apk` 附件（以实际名称为准）（正式签名）传到手机安装即可。愿意自己改代码/构建的开发者见 §8.2。
+**Android（推荐：直接下载 APK）**：从 [GitHub Releases](https://github.com/zhang132212/dsh-mobile-remote/releases/latest) 下载 `.apk` 附件（以实际名称为准）（正式签名）传到手机安装即可。愿意自己改代码/构建的开发者见 §8.2。
+
+**iOS**：不能直接安装包文件，需经 **TestFlight / App Store**，或按 §8.5 自行构建后用 Xcode 签名安装（自用免费 Apple ID 侧载 **7 天需重签**）。
 ### 8.1 架构
 
 App = **原生 Flutter 应用**（非 WebView）：全部界面用 Flutter 原生组件绘制，与插件 `/m/api` 共享同一套 API 与设计令牌（DeepSeek 配色）。
@@ -304,6 +308,25 @@ flutter build apk --release
 ### 8.4 重建与更新
 - 插件/网页端改动 → 按 §3 同步并重启 DSH。
 - App 改动 → 重新 `flutter build apk --release` 并重装（同签名覆盖安装，保留连接信息）。
+- iOS 不支持 App 内自更新（见 docs/09 §4）：更新走 TestFlight / App Store，或重新签名安装。
+
+### 8.5 构建 iOS（需 macOS + Xcode）
+
+前置：macOS + Xcode（部署目标 **iOS 15.0**）+ Flutter 3.47+。Windows/Linux 无法构建 iOS。
+
+```bash
+cd dsh-mobile-app
+flutter pub get                               # 插件经 Swift Package Manager 集成，无需 pod install
+flutter analyze
+flutter build ios --release --no-codesign     # 验证构建；产物 build/ios/iphoneos/Runner.app
+flutter build ios --simulator --debug         # 模拟器版，用于冒烟
+```
+
+- **签名安装**：Xcode 打开 `ios/Runner.xcworkspace` → Signing & Capabilities 选自己的 Team（免费 Apple ID 可侧载，7 天重签；公开分发走 TestFlight / App Store）。
+- **工程形态**：Flutter 3.47 默认 Swift Package Manager（**无 Podfile**）+ UIScene 生命周期；bundle id `com.dsh.remote`。
+- **权限/配置**：`ios/Runner/Info.plist` 已含相机、相册、本地网络权限文案，md/txt/docx/xlsx 文档类型，ATS 放行任意加载（理由：用户可自填任意 DSH 地址）。
+- **CI**：GitHub Actions macOS runner 跑 analyze / 测试 / 构建 / 模拟器冒烟，见 `docs/ios-ci.md`。
+- **本地网络权限**：iOS 14+ 首次连接局域网会弹系统授权，必须允许；拒绝后到 设置 → 隐私与安全性 → 本地网络 放行。
 
 ## 9. 验收清单（已执行 ✅）
 
@@ -314,7 +337,8 @@ flutter build apk --release
 - [x] SSE 连接 + hello + 事件转发（重连退避、断线补拉、pendingFrames 回放、心跳 25s）
 - [x] `/m/qr.png` 返回 PNG
 - [x] 桌面设置页「连接移动端设备」二维码 + App 扫码自动连接
-- [x] Flutter App：analyze 零问题 + 正式签名 release 构建 + 真机全流程测试
+- [x] Flutter App（Android）：analyze 零问题 + 正式签名 release 构建 + 真机全流程测试
+- [ ] Flutter App（iOS，待 CI 证据回填后勾选）：macOS CI `flutter build ios --release --no-codesign` + 模拟器冒烟 + 全量测试（见 docs/ios-ci.md）
 - [x] 问询弹窗端到端（手机选选项→agent 收到答案 / ✕→取消 / PC 端先答两端同步）
 - [x] 权限审批弹窗端到端（允许一次→操作继续 / 拒绝→操作被拒）
 - [x] 通知删除（单删/批量/清空）+ 诊断页服务探针（respondBridge/frameBridge ✅）

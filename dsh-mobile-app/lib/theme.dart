@@ -8,6 +8,7 @@
 //
 // 约定：页面只消费 [DshColors] / [DshType] / [DshRadius] / [DshSpace] /
 // [DshShadow] 这些语义令牌，不再写死颜色或字号。
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 /// 语义色令牌：按当前亮/暗主题解析。
@@ -673,9 +674,11 @@ class DshTheme {
       fontFamilyFallback: DshType.textFallback,
       splashFactory: InkSparkle.splashFactory,
       // 官方曲线：pages 用轻量滑入 + 淡入。
+      // iOS 必须用 CupertinoPageTransitionsBuilder：右滑返回手势（_CupertinoBackGestureDetector）
+      // 是在 Cupertino 转场里实现的；自定义 Fade+Slide 会把手势一起换掉（cross-review C2）。
       pageTransitionsTheme: const PageTransitionsTheme(builders: {
         TargetPlatform.android: _DshTransitionsBuilder(),
-        TargetPlatform.iOS: _DshTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
       }),
       appBarTheme: AppBarTheme(
         backgroundColor: c.bg,

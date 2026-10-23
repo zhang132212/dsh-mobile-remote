@@ -203,17 +203,6 @@ jobs:
           ALLOW_FAIL_STEPS: "integration-test"
         run: bash tools/ios-ci/verdict.sh
 
-      - name: 上传 iOS 证据（交给 report job 汇总回传）
-        id: upload
-        if: always() && steps.checkout.outcome == 'success'
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-evidence
-          path: ci-out/
-          if-no-files-found: warn
-          retention-days: 7
-
       # 兜底通道：即使 report job / artifact 传递出问题，也能从 ci-artifacts-ios 分支拿到 iOS 全量日志。
       # 只推小文件（阈值 8MB），并显式排除 *.zip 归档（设备版 .app 约 12MB，不该重复推）；
       # 正式证据仍以 report job 的 ci-artifacts 为准。
@@ -227,6 +216,17 @@ jobs:
           ARTIFACT_MAX_BYTES: "8388608"
           ARTIFACT_SKIP_GLOBS: "*.zip"
         run: bash tools/ios-ci/publish-artifacts.sh
+
+      - name: 上传 iOS 证据（交给 report job 汇总回传）
+        id: upload
+        if: always() && steps.checkout.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-evidence
+          path: ci-out/
+          if-no-files-found: warn
+          retention-days: 7
 
   # ────────────────────────────────────────────────────────────────────────────
   # 2) Android：release APK 回归构建（非阻塞，失败不影响 iOS 结论）

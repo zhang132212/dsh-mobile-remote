@@ -54,8 +54,14 @@ for key in checks:
     print("  %-30s %s" % (key, "OK" if key in data else "缺失"))
 print("  CFBundleDisplayName 值:", data.get("CFBundleDisplayName"))
 ats = data.get("NSAppTransportSecurity") or {}
-print("  NSAllowsArbitraryLoads:", ats.get("NSAllowsArbitraryLoads"))
-print("  NSAllowsLocalNetworking:", ats.get("NSAllowsLocalNetworking"))
+arbitrary = ats.get("NSAllowsArbitraryLoads")
+local = ats.get("NSAllowsLocalNetworking")
+print("  ATS: NSAllowsArbitraryLoads=%s" % arbitrary)
+if local is None:
+    print("  ATS: 无 NSAllowsLocalNetworking —— 按设计（iOS 10+ 两者同设时 ArbitraryLoads 会被忽略，"
+          "本 App 需连用户自填任意地址，故只保留 ArbitraryLoads=true）")
+else:
+    print("  ATS: NSAllowsLocalNetworking=%s —— 注意：与 ArbitraryLoads 同设时后者可能被忽略" % local)
 doc_types = data.get("CFBundleDocumentTypes") or []
 for item in doc_types:
     print("  文档类型:", item.get("CFBundleTypeName"), item.get("LSItemContentTypes") or item.get("CFBundleTypeExtensions"))
