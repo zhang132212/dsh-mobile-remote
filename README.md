@@ -114,7 +114,7 @@ dsh plugin add file:C:\path\to\dsh-mobile-remote
 | 项 | 要求 |
 |---|---|
 | DSH | 机制基线 `0.1.2-rc.1`（Desktop v2.0.5）：双端审批走 `$events` + 瀑布 answerer；更旧内核走帧桥；headless 形态静默不动作 |
-| Node | 20+（开发机 24.x 验证） |
+| Node | 18+（开发机 24.x 验证） |
 | 宿主插件 | `@deepseek-ai/dsh-workspace-changes`（改动审阅，缺失自动隐藏） |
 
 版本差不会崩：协议只加字段，新插件 + 旧 App / 新 App + 旧插件都能用；破坏性变更不做。发布物带 `update.json` 签名清单，供 Android App 的「检查更新」校验版本与 sha256。
