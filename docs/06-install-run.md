@@ -339,6 +339,7 @@ flutter build ios --simulator --debug         # 模拟器版，用于冒烟
 - [x] 桌面设置页「连接移动端设备」二维码 + App 扫码自动连接
 - [x] Flutter App（Android）：analyze 零问题 + 正式签名 release 构建 + 真机全流程测试
 - [x] Flutter App（iOS）：macOS CI 全绿 —— analyze / 全量测试 / 设备版 release 构建（`--no-codesign`）/ 模拟器构建 + 冒烟（截图/首帧/Impeller）/ integration_test 端到端；Android 回归 APK 亦通过（证据见 docs/ios-ci.md，验收 tag `ios-port-v4`）
+- [x] 部署验证（2026-10-24）：按 README「部署」章节在隔离 profile 实测通过（bootstrap 401/200、LAN 桥转发、qr-config 200、qr.png、Host 白名单 403、SSE hello）；过程中发现并修复 `qr-config` 500（详见 README §8 与 `ios-port/deploy-test/DEPLOY-TEST.md`）
 - [x] 问询弹窗端到端（手机选选项→agent 收到答案 / ✕→取消 / PC 端先答两端同步）
 - [x] 权限审批弹窗端到端（允许一次→操作继续 / 拒绝→操作被拒）
 - [x] 通知删除（单删/批量/清空）+ 诊断页服务探针（respondBridge/frameBridge ✅）

@@ -1,5 +1,24 @@
 # Changelog
 
+## 未发布（ios/port 分支）— iOS 移植 + 部署验证修复
+
+> 版本：App `3.2.10+33`（新增 iOS 目标）/ 插件 `3.1.5-eun.1`。
+
+### iOS 移植
+
+- 新增 `dsh-mobile-app/ios/` 完整 iOS 工程（**iOS 15.0+**，Swift Package Manager 无 Podfile，UIScene 生命周期）；原生桥实现 `dsh/files`（保存/文档选择/外部文档打开/24MB 上限/后台读/deliveryId 去重）与 `dsh/update`（iOS 恒不可用），不实现 `dsh/floating`。
+- Dart 侧平台适配：悬浮球/应用内更新在 iOS 显式降级；本地网络权限失败自动重试 + 设置路径引导；iOS 恢复 Cupertino 右滑返回；文件保存/分享/错误文案平台化。
+- 新增 GitHub Actions macOS CI（`.github/workflows/ios.yml`）：analyze / 全量测试 / 设备版 release 构建 / 模拟器冒烟 / `integration_test` / Android APK 回归 / 证据回传 `ci-artifacts` 分支；验收 tag `ios-port-v4`。
+
+### 修复
+
+- **桌面设置页「连接移动端设备」二维码数据 500**（v3.2.5 起）：`publicEntrances` 定义在 `/bootstrap` 分支内部，`/qr-config` 引用时抛 `ReferenceError`。已提升到 `handleApi` 作用域，两端点共用；实测 `qr-config` 恢复 200。
+- 部署验证（DSH 0.2.1-rc.2）：按 README 部署章节实测 bootstrap 鉴权、LAN 桥转发、qr-config、qr.png、Host 白名单、SSE hello 全部通过；DSH 0.2.x 需 `dsh plugin allow-version` 豁免（插件 peer 范围 0.1.x），已写入 README 部署章节。
+
+### 文档
+
+- README 重写：新增「部署」完整章节（前置/版本对齐、安装、配置、LAN 桥、启动验证、手机端、更新回滚、排障、实测记录）；App README 同步补全功能与构建说明；docs/06 §9 iOS 验收项勾选。
+
 ## v3.2.10（2026-10-19）— 修复问询/审批对话框超出屏幕
 
 > 版本：App `3.2.10+33` / 插件 `3.1.5-eun.1`。

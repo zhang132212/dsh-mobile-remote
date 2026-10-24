@@ -7,8 +7,8 @@
 ## 目录
 
 - [功能亮点](#功能亮点) · [平台支持与差异](#平台支持与差异) · [截图](#截图) · [架构](#架构)
-- [快速开始](#快速开始) · [安装插件](#1-安装插件) · [局域网直连](#2-局域网直连lan-桥) · [安装-App](#3-安装-app) · [扫码连接](#4-扫码连接)
-- [配置项](#配置项cordispatchyml) · [推送通知](#推送通知可选) · [iOS 专项](#ios-专项)
+- **部署**：[前置与版本对齐](#0-前置条件与版本对齐) · [安装插件](#1-安装插件) · [配置](#2-配置cordispatchyml) · [LAN 桥](#3-桌面版lan-桥与防火墙) · [启动与验证](#4-启动与验证命令级) · [手机端](#5-手机端安装与连接) · [更新回滚卸载](#6-更新--回滚--卸载) · [排障](#7-排障) · [部署验证记录](#8-部署验证记录实测)
+- [配置项全表](#配置项cordispatchyml) · [推送通知](#推送通知可选) · [iOS 专项](#ios-专项)
 - [安全](#安全) · [已知限制](#已知限制) · [兼容性](#兼容性) · [版本与发布](#版本与发布) · [文档](#文档) · [开发](#开发)
 
 ## 功能亮点
@@ -113,30 +113,72 @@
 - **移动端零插件感知**：核心功能只依赖 dsh 内核语义；个性化（模型/权限/预设/提供商）全部动态读取
 - **桌面端 / 命令行双形态兼容**：同一 profile，插件自动加载；桌面版经插件 **LAN 桥**让手机直连回环服务
 
-## 快速开始
+## 部署
 
-1. **电脑端**：安装本插件（profile 依赖 + `cordis.patch.yml` 启用）并重启 DSH —— [见下](#1-安装插件)
-2. **桌面版**：开启 LAN 桥（`lanBridge`），手机才能直连 —— [见下](#2-局域网直连lan-桥)
-3. **手机端**：安装 App（Android APK / iOS 构建或 TestFlight）—— [见下](#3-安装-app)
-4. **连接**：App「扫码连接」扫桌面 dsh 设置页「连接移动端设备」二维码，或手动填地址+口令 —— [见下](#4-扫码连接)
+> 本章是从零部署的完整步骤（插件 + 手机 App）；已按本章实测验证，见 [§8 部署验证记录](#8-部署验证记录实测)。
 
-## 1. 安装插件
+### 0. 前置条件与版本对齐
 
-> 🤖 **让 DSH 的 agent 自动安装**：直接告诉 agent「按本仓库 docs/06 安装 dsh-mobile-remote 插件」即可。发布代码请按 Release tag 锁定（例如 `#v3.2.10`）。
+| 项 | 要求 |
+|---|---|
+| 电脑 | Windows 10/11 或 macOS；手机与电脑在同一局域网 / 虚拟组网 |
+| DSH | **DSH Desktop（桌面版，推荐）** 或命令行 `dsh`（web 版） |
+| 手机 | Android 7.0+ / iOS 15.0+（见 [§5](#5-手机端安装与连接)） |
 
-### 依赖声明（profile 的 `package.json`）
+**⚠️ 版本对齐（最容易踩的坑）**：
 
-```json
-{
-  "dependencies": {
-    "dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.10"
-  }
-}
-```
+- `dsh` CLI 版本必须与 profile 的 bundle 版本一致（如 CLI `0.2.1-rc.2` 配 `0.2.1-rc.2` 的 bundle）；不一致时启动报 `ERR_MODULE_NOT_FOUND: @deepseek-ai/dsh-client-ui-*`。
+- 本插件的 `peerDependencies` 声明 **DSH 0.1.x 基线**（`>=0.1.0-rc.6 <0.2.0`）。在 **DSH 0.2.x** 上加载器会判定不兼容并**静默禁用插件**（日志 `disabling profile plugin row "mobile-remote"`）。解决方式：
+  1. **显式版本豁免**（实测可用）：
+     ```bash
+     dsh plugin --profile <profile> allow-version dsh-mobile-remote@<插件版本> --dsh-version <dsh版本> --accept-risk
+     # 例：dsh plugin --profile web allow-version dsh-mobile-remote@3.1.5-eun.1 --dsh-version 0.2.1-rc.2 --accept-risk
+     ```
+     豁免只对「精确包版本 + 精确 DSH 版本」生效；`dsh plugin --profile <profile> version-exemptions` 可查看。
+  2. 或使用与插件基线匹配的 DSH（0.1.x）。
 
-也可以：本地 clone 后用 `file:<本仓库路径>`；或下载 Release 里的插件 `tgz` 附件离线安装。装好依赖后执行 `corepack pnpm install`。
+### 1. 安装插件
 
-### 启用（`cordis.patch.yml`）
+#### 方式 A：DSH Desktop（桌面版，推荐）
+
+1. **找到 profile 目录**：Windows `C:\Users\<你>\.dsh\profiles\desktop`；macOS `~/.dsh/profiles/desktop`。
+2. **声明依赖**：编辑该目录的 `package.json`，在 `dependencies` 中加入（三选一）：
+   ```json
+   {
+     "dependencies": {
+       "dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.10"
+     }
+   }
+   ```
+   - 发布 tag（推荐，锁定配套版本）：`github:zhang132212/dsh-mobile-remote#v3.2.10`
+   - 本地 clone：`file:D:/path/to/dsh-mobile-remote`
+   - 离线安装：下载 Release 的插件 `.tgz`，写 `file:C:/path/to/dsh-mobile-remote-<版本>.tgz`
+3. **安装依赖**：
+   ```powershell
+   cd C:\Users\<你>\.dsh\profiles\desktop
+   corepack pnpm install
+   ```
+4. **启用插件**：编辑同目录 `cordis.patch.yml`，加入 mobile-remote 行（完整示例见 [§2](#2-配置cordispatchyml)）。
+5. **重启 DSH Desktop**（插件随进程加载）。
+6. **验证**：启动日志出现 `mobile-remote: lanBridge 已监听 0.0.0.0:3080 → 127.0.0.1:<port>/m/api`；桌面设置页出现「连接移动端设备」。
+
+#### 方式 B：命令行 dsh web
+
+1. 同上，编辑 `~/.dsh/profiles/web/package.json` 并 `corepack pnpm install`；
+2. `cordis.patch.yml` 加 mobile-remote 行（**web 版 webserver 默认已监听 `0.0.0.0:3080`，无需 LAN 桥**）；
+3. 启动：`dsh web`（等价 `dsh --profile web`）；自定义端口/监听地址：
+   ```bash
+   dsh web --host 0.0.0.0 --port 3080 --no-open
+   ```
+4. 验证：`curl -s -o NUL -w "%{http_code}" http://127.0.0.1:3080/m/api/bootstrap` → 配置了口令时应为 **401**（说明插件已挂载且鉴权生效）。
+
+#### 方式 C：让 DSH 的 agent 自动安装
+
+把本仓库交给 DSH 的 agent，说：「按 docs/06 安装 dsh-mobile-remote 插件」即可；发布代码请按 Release tag 锁定。
+
+### 2. 配置（cordis.patch.yml）
+
+在 profile 的 `cordis.patch.yml` 追加（字段含义见 [配置项全表](#配置项cordispatchyml)）：
 
 ```yaml
 - insert:
@@ -144,57 +186,109 @@
       name: dsh-mobile-remote
       config:
         path: /m
-        authToken: <访问口令，留空=关闭认证>
-        pushUrls: []          # 可选：推送通道，见「推送通知」
-        lanBridge:            # 桌面版必开（手机局域网直连）
+        authToken: <访问口令，建议 ≥16 位随机串；留空=关闭认证>
+        # 桌面版必开（手机局域网直连）；web 版默认已监听 0.0.0.0，无需此项
+        lanBridge:
           enabled: true
           port: 3080
           host: 0.0.0.0
+        pushUrls: []          # 可选：推送通道，见「推送通知」
 ```
 
+> 口令生成：`node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`
+>
 > ⚠️ **不要覆盖 `webserver` 行**：桌面版 webserver 强制回环（覆盖 host 会报错）；web 版默认已是 `0.0.0.0:3080`，无需覆盖。确要改端口时必须写全必填字段（`host` + `port`），否则启动报 `$port missing required value`（`--dump-config` 测不出来，只有真启动才暴露）。
 
-### 重启
+### 3. 桌面版：LAN 桥与防火墙
 
-- **桌面版（DSH Desktop）**：同步已安装副本（`cd ~/.dsh/profiles/desktop && corepack pnpm install`）后**重启 DSH Desktop**。日志出现 `lanBridge 已监听 0.0.0.0:3080` 即桥已工作。
-- **web 版（`dsh web`）**：profile 换 `web`，重启进程即可（web 版 webserver 默认即 `0.0.0.0:3080`）。
+> **背景**：DSH Desktop 强制 web 服务只听 `127.0.0.1`，手机无法直连；插件自 v3.0.0 起内置 LAN 桥：在 DSH 进程内再监听一个端口，把 `/m` 前缀请求流式转发到回环 webserver。**未配置 `authToken` 时桥拒绝启动**。
 
-安装位置、三种依赖声明方式、回滚方案见 [docs/06-install-run.md](docs/06-install-run.md)。
+1. 按 [§2](#2-配置cordispatchyml) 开启 `lanBridge` 并重启；
+2. 首次监听 `0.0.0.0` 时 Windows 防火墙弹窗点「允许」；或手动放行：
+   ```powershell
+   netsh advfirewall firewall add rule name="DSH Mobile LAN" dir=in action=allow protocol=TCP localport=3080
+   ```
+3. 验证桥已工作：
+   ```bash
+   curl -s -o NUL -w "%{http_code}" -H "x-mobile-token: <口令>" http://<电脑局域网IP>:3080/m/api/bootstrap
+   # 期望：200（桥已把请求转发到回环 webserver）
+   ```
+4. 桥只转发移动端面（`/m` 前缀），不转发 `api` 网关与 `qr-config` / `qr.png`（安全边界）。
 
-## 2. 局域网直连（LAN 桥）
+### 4. 启动与验证（命令级）
 
-> **背景**：DSH Desktop 强制 web 服务只听 `127.0.0.1`，手机无法直连；**web 版默认监听 `0.0.0.0:3080`** 开箱即用。桌面版自 v3.0.0 起由插件内置 LAN 桥解决。
+重启 DSH 后逐项验证（`<口令>` 换成配置里的 `authToken`）：
 
-1. 在插件 config 加 `lanBridge`（见上）并重启；首次监听 `0.0.0.0` 时 Windows 防火墙弹窗点「允许」（或手动放行 3080/TCP）。
-2. 手机设置 → 重新配置连接 → 扫码（二维码已自动变为桥地址）或手动填 `http://<电脑局域网IP>:3080/m` + 口令。
-3. 桥只转发移动端面（`/m` 前缀），不转发 `api` 网关与二维码端点；**未配置 `authToken` 时拒绝启动**。
+| 检查项 | 命令 | 期望 |
+|---|---|---|
+| 插件已挂载 + 鉴权生效 | `curl -s -o NUL -w "%{http_code}" http://127.0.0.1:3080/m/api/bootstrap` | `401`（未带口令）；未配口令时 `200` |
+| 口令正确 | `curl -s -H "x-mobile-token: <口令>" http://127.0.0.1:3080/m/api/bootstrap` | `200` + JSON（`ok` / `plugin.version` / `server.urls`） |
+| LAN 桥（桌面版） | `curl -s -o NUL -w "%{http_code}" -H "x-mobile-token: <口令>" http://<电脑局域网IP>:3080/m/api/bootstrap` | `200` |
+| 二维码数据（桌面设置页用） | `curl -s http://127.0.0.1:3080/m/api/qr-config` | `200` + `{ok,urls,token,path}`（**仅本机可访问**） |
+| 二维码图片 | `curl -o qr.png "http://127.0.0.1:3080/m/qr.png?text=test"` | `200`、`image/png` |
+| SSE 事件流 | `curl -N -H "x-mobile-token: <口令>" http://127.0.0.1:3080/m/api/events` | 首帧 `: connected`，随后 `data: {"type":"hello",...}` |
+| Host 白名单 | `curl -s -o NUL -w "%{http_code}" -H "Host: evil.example" http://127.0.0.1:3080/m/api/bootstrap` | `403` |
+| 环境诊断（App） | App → 设置 → 环境诊断 | 各项 ✅ |
 
-人不在家：推荐**蒲公英组网**（已实测）或 Tailscale 等虚拟组网；也可在 `publicUrls` 里登记穿透入口，App 会自动纳入候选地址。见 [docs/06 §5](docs/06-install-run.md)。
+### 5. 手机端安装与连接
 
-## 3. 安装 App
+**Android**：从 [GitHub Releases](https://github.com/zhang132212/dsh-mobile-remote/releases/latest) 下载 `apk` 安装，或自行构建（见 [开发](#开发)）。
 
-### Android（7.0+）
+**iOS**：经 TestFlight / App Store，或 Mac + Xcode 自行签名安装（见 [iOS 专项](#ios-专项)）。
 
-- 从 [GitHub Releases](https://github.com/zhang132212/dsh-mobile-remote/releases/latest) 下载 `apk` 安装（正式签名）；或自行构建：
+**连接步骤**：
 
-```powershell
-cd dsh-mobile-app
-flutter analyze
-flutter build apk --release   # 产物 build\app\outputs\flutter-apk\app-release.apk
-```
+1. 桌面 dsh 设置页 →「连接移动端设备」→ 显示二维码（含地址+口令）；
+2. 手机 App →「扫码连接」扫该二维码（或手动输入 `http://<电脑地址>:<端口>/m` + 口令）；
+3. 首次连接 iOS 会弹「本地网络」权限，**必须允许**；拒绝后到 设置 → 隐私与安全性 → 本地网络 放行；
+4. 连上后首页即可发消息派活。
 
-### iOS（15.0+）
+> 人不在家：用蒲公英 / Tailscale 等虚拟组网（已实测），或按 [docs/06 §5](docs/06-install-run.md) 配置穿透（需 `trustedHosts` + 强口令 + TLS）。
 
-- **普通用户**：经 TestFlight / App Store 安装（公开分发需 Apple 开发者账号）。
-- **开发者 / 自用**：Mac + Xcode 自行签名安装（免费 Apple ID 可侧载，**7 天需重签**），见 [iOS 专项](#ios-专项)。
+### 6. 更新 / 回滚 / 卸载
 
-> Android 正式分发须自建 keystore（换签名=换应用）；keystore 与 `key.properties` 已 gitignore，勿提交、勿丢失。
+| 操作 | 步骤 |
+|---|---|
+| 更新插件 | 改 `package.json` 里的 tag/路径 → `corepack pnpm install` → 重启 DSH；口令未变时无需重扫二维码 |
+| 回滚插件 | `cordis.patch.yml` 删除 mobile-remote 行 → `package.json` 删除依赖 → `corepack pnpm install` → 重启；插件路由/SSE 随进程释放，桌面 GUI 不受影响 |
+| 更新 App（Android） | 同签名 APK 覆盖安装，连接信息保留；换签名需卸载重装并重扫 |
+| 更新 App（iOS） | TestFlight / App Store，或重新签名安装 |
+| 卸载 | 同「回滚插件」；App 直接卸载即可（会话数据在电脑端，不受影响） |
 
-## 4. 扫码连接
+### 7. 排障
 
-插件启用后，dsh 设置页会出现**「连接移动端设备」**一页：显示连接二维码（含地址+口令）、电脑地址列表与口令（可复制）。手机 App 扫此二维码即自动连接；也可手动输入地址 + 口令。
+| 现象 | 原因 | 解决 |
+|---|---|---|
+| `curl /m/api/bootstrap` 返回 404 | 插件未加载（依赖未装/未重启/`path` 改错） | 检查 profile `node_modules/dsh-mobile-remote`、重启 DSH、核对 `path` |
+| 日志 `disabling profile plugin row "mobile-remote"` | DSH 版本超出插件 peer 范围 | 按 [§0](#0-前置条件与版本对齐) 做 `allow-version` 豁免，或换匹配版本 DSH |
+| 启动报 `ERR_MODULE_NOT_FOUND: @deepseek-ai/dsh-client-ui-*` | `dsh` CLI 与 profile bundle 版本不一致 | 升级/对齐 DSH CLI 与 profile 版本 |
+| 桌面设置页二维码报错 / `qr-config` 500 | v3.2.5–v3.2.10 的已知 bug（`publicEntrances` 作用域越界） | 升级到含修复的版本（本分支已修复，见 [§8](#8-部署验证记录实测)） |
+| 手机连不上（超时） | 防火墙拦截 / 不同网段 / LAN 桥未开 / iOS 本地网络权限未允许 | 放行端口、确认同网段/组网、开 LAN 桥、iOS 设置放行 |
+| 手机连上但加载不出对话 | 候选地址含不可达的 webserver 回环地址（旧版 bug） | 升级插件；确认 `server.urls` 是 LAN 桥/穿透地址 |
+| 403 `host-not-allowed` | 经中继访问但未声明 `trustedHosts` | 把中继域名/IP 写入 `trustedHosts` |
+| 429 `rate-limited` | 口令错误次数过多（默认 10 次/60s 封 60s） | 等待窗口结束；核对口令 |
+| 启动报 `$port missing required value` | 覆盖了 `webserver` 行且字段不全 | 删除该覆盖行（推荐），或写全 `host` + `port` |
+| 端口被占用 | 3080 已被其它服务使用 | 改 `lanBridge.port`（web 版改 webserver 端口），手机地址同步改 |
 
-> 二维码含访问口令，请勿截屏转发。`/m/api/qr-config` 仅允许电脑本机读取。
+### 8. 部署验证记录（实测）
+
+> 2026-10-24 按本章步骤在隔离测试 profile 上完整走了一遍；详细证据见 `ios-port/deploy-test/`。
+
+| 项 | 实测结果 |
+|---|---|
+| 环境 | Windows 11 · Node 24.16 · DSH **0.2.1-rc.2**（`D:\dsh-remote` CLI） |
+| 安装 | 新建测试 profile → `corepack pnpm install`（30 个包，10.6s）→ `cordis.patch.yml` 配置 → `dsh --profile deploy-test --host 127.0.0.1 --port 3096 --no-open` |
+| 版本兼容 | DSH 0.2.x 需 `allow-version` 豁免（否则插件被静默禁用）；豁免后插件正常加载 |
+| bootstrap（无口令） | ✅ `401` |
+| bootstrap（带口令） | ✅ `200`（`ok=true`，`plugin.version=3.1.5-eun.1`，`server.urls` 含 LAN 桥地址） |
+| LAN 桥转发（0.0.0.0:3091 → 回环 3096） | ✅ 无口令 `401` / 带口令 `200` |
+| 二维码数据 `/m/api/qr-config` | ✅ `200`（`{ok,urls,token,path}`）——**测试中发现并修复了 500 bug** |
+| 二维码图片 `/m/qr.png?text=` | ✅ `200` `image/png`（2470 bytes） |
+| Host 白名单 | ✅ 非法 Host 返回 `403` |
+| SSE `/m/api/events` | ✅ `: connected` + `data: {"type":"hello",...}` |
+| 手机真机连接 | ⚠️ 未在本机验证（无真机接入本次测试实例）；协议层已验证 |
+
+**本次测试发现并修复的 bug**：`/m/api/qr-config`（桌面设置页「连接移动端设备」二维码数据）在 v3.2.5 之后返回 **500** —— `publicEntrances` 函数被定义在 `/bootstrap` 分支内部，`/qr-config` 引用时抛 `ReferenceError`。已将其提升到 `handleApi` 作用域、两个端点共用；修复后复测 `200`。
 
 ## 配置项（`cordis.patch.yml`）
 
@@ -426,6 +520,8 @@ flutter build ios --simulator --debug
 ```
 
 > 本机中文路径下 `flutter analyze` 的 analysis server 可能因 LSP 解析崩溃（Flutter 3.47 / Windows），可改用 `dart analyze` 或把工程放在 ASCII 路径下；CI 在 ASCII 路径运行 `flutter analyze --no-pub` 正常。
+>
+> 插件测试会 `import lib/index.js`，需要能解析 `@deepseek-ai/*` peer 依赖（在已部署 profile 的 node_modules 环境下，或先 `corepack pnpm install` 装好 peer）；纯 clone 直接跑 `node --test` 会报 `ERR_MODULE_NOT_FOUND`。
 
 ### 图标
 
