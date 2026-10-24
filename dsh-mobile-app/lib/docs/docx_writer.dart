@@ -155,6 +155,31 @@ class _DocxCtx {
 
       case DocRaw(:final text):
         return _p(_run(text));
+
+      // v3.2.11：数据结构类（XML / JSON 树、SVG）——阅读页默认不点亮「导出 Word」，
+      // 但用户仍可通过菜单导出；这里按缩进纯文本 / 源码兜底，保证「至少可读」。
+      case DocTree(:final roots):
+        final out = StringBuffer();
+        void walk(List<TreeNode> nodes, int depth) {
+          for (final n in nodes) {
+            final attrs = n.attrs.isEmpty
+                ? ''
+                : ' ${n.attrs.map((a) => '${a.name}="${a.value}"').join(' ')}';
+            final text = n.text == null || n.text!.isEmpty ? '' : ': ${n.text}';
+            out.write(_p(_run('${'  ' * depth}${n.name}$attrs$text', code: true)));
+            walk(n.children, depth + 1);
+          }
+        }
+
+        walk(roots, 0);
+        return out.toString();
+
+      case DocSvg(:final source):
+        final out = StringBuffer();
+        for (final line in source.split('\n')) {
+          out.write(_p(_run(line, code: true), shade: 'F5F5F5'));
+        }
+        return out.toString();
     }
   }
 

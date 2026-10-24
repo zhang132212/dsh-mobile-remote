@@ -10,6 +10,8 @@
 // v3.3.0（官方风格）：页面底 c.docPreview，正文套一张 DshCard「纸张」（layer1 + 发丝边 +
 // R20）；标题栏换 DshAppBar，动作按钮换 DshIconButton，加载/错误/告警分别用
 // DshLoading / DshError / DshBanner，目录弹层用 DshSheet + DshTile。
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -17,9 +19,13 @@ import 'package:path/path.dart' as p;
 
 import '../api.dart';
 import '../docs/docx_writer.dart';
+import '../docs/html_interactive.dart';
 import '../docs/loader.dart';
 import '../docs/model.dart';
 import '../docs/render.dart';
+import '../review/diff_view.dart';
+import '../review/model.dart' as review;
+import '../review/ref.dart';
 import '../dsh_kit.dart';
 import '../l10n.dart';
 import '../theme.dart';
@@ -47,6 +53,10 @@ class DocViewerScreen extends StatefulWidget {
   /// 嵌入式：不套 Scaffold/AppBar，改用紧凑头部——供底部抽屉复用，
   /// 这样在聊天里点链接就地阅读时，**对话不会被关掉**。
   final bool embedded;
+
+  /// v3.2.14（改动审阅）：这份文件在本轮改动里的坐标。非空时页面顶部出现
+  /// 「文档 / 改动」切换——读全文与看这一轮到底改了什么，在同一个阅读器里完成。
+  final DocReviewRef? review;
   const DocViewerScreen({
     super.key,
     required this.name,
@@ -55,6 +65,7 @@ class DocViewerScreen extends StatefulWidget {
     this.httpUrl,
     this.api,
     this.embedded = false,
+    this.review,
   });
 
   @override
@@ -73,6 +84,22 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
   final _outline = <(int, String)>[];
   final _outlineBlockIndex = <int>[];
 
+  /// HTML 文档内锚点 id → 块 GlobalKey（#hash 链接跳转用）。
+  final _anchorKeys = <String, GlobalKey>{};
+  bool _anchorsReady = false;
+
+  /// 树形结构（XML / JSON）的展开状态——放在页面 state 里，
+  /// 「更多」菜单和正文树共享同一份；滚动 / 改字号重建不丢。
+  final _treeCtrl = DocTreeController();
+
+  /// v3.2.14（改动审阅）：「文档 / 改动」页签（0=文档，1=改动）。
+  int _reviewMode = 0;
+
+  /// 本轮对比（每个文件一份，切页签只读一次）。
+  review.FileDiff? _reviewDiff;
+  bool _reviewLoading = false;
+  String? _reviewError;
+
   @override
   void initState() {
     super.initState();
@@ -82,6 +109,7 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
   @override
   void dispose() {
     _scroll.dispose();
+    _treeCtrl.dispose();
     super.dispose();
   }
 
@@ -144,6 +172,40 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         _outline.add((b.level, text));
         _outlineBlockIndex.add(i);
       }
+    }
+  }
+
+  /// 收集 HTML 文档内锚点（id）→ 块 GlobalKey，供 #hash 链接跳转。
+  ///
+  /// 与目录共用同一份 block key 表：一个块同时是标题和锚点时不会抢 key。
+  void _ensureAnchors(Document doc) {
+    if (_anchorsReady) return;
+    _anchorsReady = true;
+    for (var i = 0; i < doc.blocks.length; i++) {
+      final anchor = switch (doc.blocks[i]) {
+        DocHeading(:final anchor) => anchor,
+        DocPara(:final anchor) => anchor,
+        _ => null,
+      };
+      if (anchor == null || anchor.isEmpty) continue;
+      _anchorKeys[anchor] = _headingKeys[i] ??= GlobalKey();
+    }
+  }
+
+  /// 跳转到文档内锚点（找不到时给一句人话提示，不静默）。
+  void _jumpAnchor(String anchor) {
+    final key = _anchorKeys[anchor] ?? _anchorKeys[Uri.decodeComponent(anchor)];
+    if (key == null) {
+      showToast(context, L10n.t('未找到锚点 #$anchor', 'Anchor not found: #$anchor'));
+      return;
+    }
+    final target = key.currentContext;
+    if (target != null) {
+      Scrollable.ensureVisible(
+        target,
+        duration: const Duration(milliseconds: 240),
+        alignment: 0.02,
+      );
     }
   }
 
@@ -241,6 +303,36 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
     }
   }
 
+  /// HTML「交互模式」：交给原生 WebView 跑真浏览器引擎——页面里 JS 设计的按钮真的能点。
+  ///
+  /// 网络文档直接把 URL 交给 WebView；电脑工作区的本地 HTML 则把正文 + 所在目录
+  /// 一起交给原生侧，由它按目录把相对路径的 JS / CSS / 图片从电脑拉下来。
+  Future<void> _openInteractive() async {
+    final doc = _doc;
+    if (doc == null || doc.format != DocFormat.html) return;
+    final raw = _raw;
+    final remoteUrl = widget.httpUrl;
+    if (remoteUrl == null && (raw == null || raw.isEmpty)) {
+      showToast(context, L10n.t('没有可用的 HTML 内容', 'No HTML content'));
+      return;
+    }
+    try {
+      final ok = await openInteractiveHtml(
+        url: remoteUrl,
+        html: remoteUrl == null ? utf8.decode(raw!, allowMalformed: true) : null,
+        title: doc.title,
+        baseDir: widget.remotePath == null ? null : p.windows.dirname(widget.remotePath!),
+      );
+      if (!ok && mounted) {
+        showToast(context, L10n.t('交互模式启动失败', 'Failed to open interactive mode'));
+      }
+    } catch (e) {
+      if (mounted) {
+        showToast(context, L10n.t('交互模式启动失败：$e', 'Interactive mode failed: $e'));
+      }
+    }
+  }
+
   /// 把原始文件另存到系统下载目录。
   Future<void> _saveOriginal() async {
     final raw = _raw;
@@ -276,14 +368,37 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         DocTable(:final rows) =>
           rows.map((r) => r.map((c) => _plainOfInline(c.spans)).join(' | ')).join('\n'),
         DocRaw(:final text) => text,
+        DocTree(:final roots) => _plainOfTree(roots),
+        DocSvg(:final source) => source,
         DocRule() => '',
       };
+
+  /// 树形结构拍平成缩进文本（复制全文用；缩进保留层级，粘到聊天里也可读）。
+  static String _plainOfTree(List<TreeNode> roots) {
+    final b = StringBuffer();
+    void walk(List<TreeNode> nodes, int depth) {
+      for (final n in nodes) {
+        final attrs = n.attrs.isEmpty
+            ? ''
+            : ' ${n.attrs.map((a) => '${a.name}="${a.value}"').join(' ')}';
+        final text = n.text == null || n.text!.isEmpty ? '' : ': ${n.text}';
+        b.writeln('${'  ' * depth}${n.name}$attrs$text');
+        walk(n.children, depth + 1);
+      }
+    }
+
+    walk(roots, 0);
+    return b.toString().trimRight();
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = DshPalette.of(context);
     final doc = _doc;
-    if (doc != null) _ensureOutline(doc);
+    if (doc != null) {
+      _ensureOutline(doc);
+      _ensureAnchors(doc);
+    }
 
     if (widget.embedded) {
       // 抽屉模式：紧凑头部 + 正文。对话在抽屉下面保持存活，划下去就回到聊天。
@@ -293,6 +408,7 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
         child: Column(
           children: [
             _embeddedHeader(context, doc),
+            _reviewBar(context),
             Expanded(child: _body()),
           ],
         ),
@@ -303,9 +419,14 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
       backgroundColor: c.docPreview,
       appBar: DshAppBar(
         title: widget.name.split(RegExp(r'[\\/]')).last,
-        actions: _actions(doc),
+        actions: _reviewMode == 0 ? _actions(doc) : const [],
       ),
-      body: _body(),
+      body: Column(
+        children: [
+          _reviewBar(context),
+          Expanded(child: _body()),
+        ],
+      ),
     );
   }
 
@@ -331,9 +452,30 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
     );
   }
 
+  /// 只有真有标题结构才显示「目录」：xlsx / 树形结构与目录无关。
+  bool _hasOutlineEntry(Document? doc) =>
+      doc != null && doc.format != DocFormat.xlsx && !documentHasTree(doc);
+
+  /// 「导出 Word」对数据结构 / 矢量图没有意义（原样阅读才是需求），
+  /// 对正文类格式保留（md / txt / docx / html）。
+  bool _canExportWord(Document? doc) =>
+      doc == null ||
+      (doc.format != DocFormat.svg &&
+          doc.format != DocFormat.xml &&
+          doc.format != DocFormat.json);
+
   /// 全屏页与抽屉共用的操作按钮。
   List<Widget> _actions(Document? doc) => [
-        if (doc != null && doc.format != DocFormat.xlsx)
+        // HTML：一键进入「交互模式」——跑真 WebView，页面里的按钮/脚本可用
+        if (doc != null && doc.format == DocFormat.html)
+          Center(
+            child: DshIconButton(
+              icon: Icons.touch_app_outlined,
+              tooltip: L10n.t('交互模式（可点按钮）', 'Interactive mode (buttons work)'),
+              onTap: _openInteractive,
+            ),
+          ),
+        if (_hasOutlineEntry(doc))
           Center(
             child: DshIconButton(
               icon: Icons.list_alt_outlined,
@@ -359,6 +501,10 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
                   _saveOriginal();
                 case 'copy':
                   _copyAll();
+                case 'tree-expand':
+                  _treeCtrl.expandAll();
+                case 'tree-collapse':
+                  _treeCtrl.collapseAll();
               }
             },
             itemBuilder: (c) => [
@@ -372,10 +518,22 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
               ),
               PopupMenuItem(value: 'font0', child: Text(L10n.t('恢复默认字号', 'Reset text size'))),
               const PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'word',
-                child: Text(L10n.t('导出 Word（公式原生）', 'Export Word (native equations)')),
-              ),
+              if (doc != null && documentHasTree(doc)) ...[
+                PopupMenuItem(
+                  value: 'tree-expand',
+                  child: Text(L10n.t('全部展开', 'Expand all')),
+                ),
+                PopupMenuItem(
+                  value: 'tree-collapse',
+                  child: Text(L10n.t('全部折叠', 'Collapse all')),
+                ),
+                const PopupMenuDivider(),
+              ],
+              if (_canExportWord(doc))
+                PopupMenuItem(
+                  value: 'word',
+                  child: Text(L10n.t('导出 Word（公式原生）', 'Export Word (native equations)')),
+                ),
               PopupMenuItem(value: 'save', child: Text(L10n.t('另存原文件', 'Save original file'))),
               if (doc != null && doc.format != DocFormat.xlsx)
                 PopupMenuItem(value: 'copy', child: Text(L10n.t('复制全文', 'Copy full text'))),
@@ -383,6 +541,155 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
           ),
         ),
       ];
+
+  /// v3.2.14：（从改动审阅页打开时）顶部的「文档 / 改动」切换条。
+  ///
+  /// 这是「重构文档阅读器」的关键一步：阅读器不再只是把文件摊开给你读，它还能把
+  /// **这一轮到底改了哪几行**按增删标记摆出来——review 与阅读在同一个页面里完成。
+  Widget _reviewBar(BuildContext context) {
+    if (widget.review == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(DshSpace.pageH, DshSpace.sm, DshSpace.pageH, 0),
+      child: DshSegmented(
+        items: [L10n.t('文档', 'Document'), L10n.t('改动', 'Changes')],
+        index: _reviewMode,
+        onChanged: (i) {
+          if (i == _reviewMode) return;
+          setState(() => _reviewMode = i);
+          if (i == 1) _loadReviewDiff();
+        },
+      ),
+    );
+  }
+
+  /// 读本轮对比（每个文件只读一次；失败可重试）。
+  Future<void> _loadReviewDiff({bool force = false}) async {
+    final ref = widget.review;
+    if (ref == null) return;
+    if (!force && (_reviewDiff != null || _reviewLoading)) return;
+    final api = widget.api;
+    if (api == null) {
+      setState(() => _reviewError = L10n.t('缺少连接信息', 'Missing connection'));
+      return;
+    }
+    setState(() {
+      _reviewLoading = true;
+      _reviewError = null;
+    });
+    try {
+      final diff = await api.changesDiff(ref.sessionId, ref.seq, ref.index);
+      if (!mounted) return;
+      setState(() {
+        _reviewDiff = diff;
+        _reviewLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _reviewError = '$e';
+        _reviewLoading = false;
+      });
+    }
+  }
+
+  /// 「改动」页签正文：文件路径 + 状态说明 + 逐行对比。
+  Widget _reviewBody() {
+    final c = DshPalette.of(context);
+    if (_reviewLoading) return const DshLoading();
+    final error = _reviewError;
+    if (error != null) {
+      return DshError(
+        message: L10n.t('读取对比失败：$error', 'Failed to load comparison: $error'),
+        onRetry: () => _loadReviewDiff(force: true),
+      );
+    }
+    final diff = _reviewDiff;
+    if (diff == null) return const SizedBox.shrink();
+
+    // 二进制/过大/相同由正文占位行说明；头部只补「新建 / 删除 / 对比超时」。
+    final note = diff.kind == review.FileDiffKind.text && !diff.identical ? diff.statusNote : null;
+    Widget body;
+    if (diff.kind == review.FileDiffKind.binary) {
+      body = DiffPlaceholder(
+        icon: Icons.data_array,
+        text: L10n.t('二进制文件，没有逐行对比', 'Binary file — no line comparison'),
+      );
+    } else if (diff.kind == review.FileDiffKind.oversized) {
+      body = DiffPlaceholder(
+        icon: Icons.unfold_more,
+        text: L10n.t('文件超过 2 MB，未生成对比', 'File exceeds 2 MB — no comparison'),
+      );
+    } else if (diff.identical) {
+      body = DiffPlaceholder(
+        icon: Icons.check_circle_outline,
+        text: note ?? L10n.t('本轮内容没有变化', 'No content change this turn'),
+      );
+    } else {
+      body = SelectionArea(child: DiffHunksView(hunks: diff.hunks));
+    }
+
+    return Scrollbar(
+      controller: _scroll,
+      child: SingleChildScrollView(
+        controller: _scroll,
+        padding: const EdgeInsets.fromLTRB(
+          DshSpace.pageH,
+          DshSpace.sm,
+          DshSpace.pageH,
+          DshSpace.xxxl,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (note != null && !diff.identical) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: DshSpace.sm),
+                child: Text(
+                  note,
+                  style: DshType.xxs12.copyWith(color: c.ink3),
+                ),
+              ),
+            ],
+            body,
+          ],
+        ),
+      ),
+    );
+  }
+  /// HTML 文档的「交互模式」入口条：点一下用原生 WebView 跑真浏览器引擎。
+  Widget _interactiveBanner(BuildContext context) {
+    final c = DshPalette.of(context);
+    return Material(
+      color: c.brandSoft,
+      borderRadius: DshRadius.rMd,
+      child: InkWell(
+        borderRadius: DshRadius.rMd,
+        onTap: _openInteractive,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DshSpace.md,
+            vertical: DshSpace.sm,
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.touch_app_outlined, size: 18, color: c.ink2),
+              const SizedBox(width: DshSpace.sm),
+              Expanded(
+                child: Text(
+                  L10n.t(
+                    '这是静态阅读模式。想点页面里的按钮？进入交互模式 →',
+                    'Static reading view. To tap the page buttons, open interactive mode →',
+                  ),
+                  style: DshType.mdSmall.copyWith(color: c.ink2),
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: c.ink3),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _body() {
     final c = DshPalette.of(context);
@@ -402,6 +709,9 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
       );
     }
 
+    // v3.2.14：「改动」页签不依赖文档解析（二进制/超大文件也能看对比）。
+    if (_reviewMode == 1) return _reviewBody();
+
     final doc = _doc;
     if (doc == null) return const SizedBox.shrink();
 
@@ -413,6 +723,8 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
       api: widget.api,
       baseDir: widget.remotePath == null ? null : p.windows.dirname(widget.remotePath!),
       baseUrl: widget.httpUrl,
+      tree: _treeCtrl,
+      onAnchor: _jumpAnchor,
     );
 
     // 电子表格：多表用胶囊选择器切换
@@ -472,6 +784,12 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
                   tone: DshBannerTone.warn,
                   icon: Icons.warning_amber_rounded,
                 ),
+                const SizedBox(height: DshSpace.md),
+              ],
+              // HTML：静态排版只负责「读」；页面里 JS 设计的按钮要真浏览器引擎才能点。
+              // 入口条做显眼一点，避免用户以为「按钮点不了 = 坏了」。
+              if (doc.format == DocFormat.html) ...[
+                _interactiveBanner(context),
                 const SizedBox(height: DshSpace.md),
               ],
               DocBlocks(doc.blocks, ctx: ctx, headingKeys: _headingKeys),
