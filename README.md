@@ -6,6 +6,8 @@
 
 > 电脑端插件（Node，挂载在 dsh 的 webServer 上） + 安卓原生 App（Flutter）。
 > 当前发布：**App `3.2.15+38`** · **插件 `3.1.5-eun.1`** · tag [`v3.2.15`](https://github.com/zhang132212/dsh-mobile-remote/releases/tag/v3.2.15) · MIT
+>
+> 分支：**`main` 本分支（安卓发布线）** · `ios`（iOS 移植，未发布） · `plugin`（插件源码，不含 App）
 
 | 首页 | 对话 | 通知 |
 |---|---|---|

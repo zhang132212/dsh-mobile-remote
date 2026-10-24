@@ -7,12 +7,24 @@
 - **报告问题**：GitHub Issues —— 说明环境（dsh 版本 / 平台）、操作步骤、现象；移动端问题附截图更佳
 - **提交代码**：Fork → 分支 → PR；小改动直接 PR，大功能先开 issue 讨论
 - **文档**：README / docs/ 的任何改进都欢迎
-- **二次开发**：见 `docs/08-扩展开发指南.md` —— 欢迎基于本项目做自己的定制并回馈上游
+- **二次开发**：见 `docs/08-扩展开发指南.md` —— 欢迎基于本项目做自己的定制，把改进提回仓库
 
 ## 开发环境
 
 - **插件**：Node.js 18+；在 `~/.dsh/profiles/<desktop|web>` 以 `file:` 依赖引入（见 docs/06-install-run.md；桌面版移动端用 LAN 桥）
-- **App**：Flutter 3.47+ + Android SDK；`flutter analyze` 必须零问题
+- **App**：Flutter 3.35+（本仓在 3.47.x 上验证）+ Android SDK；`flutter analyze` 必须零问题
+
+## 分支模型
+
+| 分支 | 内容 | 能否发 Release |
+|---|---|---|
+| `main` | 安卓发布线：插件 + App 同树，完整可发布 | ✅ 唯一发布分支 |
+| `ios` | `main` + iOS 平台层（`dsh-mobile-app/ios/`、平台适配、macOS CI），未发布 | ❌ |
+| `plugin` | 插件源码导出：`main` 去掉 `dsh-mobile-app/`，供 `dsh plugin add …#plugin` | ❌ |
+
+- 功能开发在 `main`；iOS 专属改动只进 `ios`；`plugin` 由 `main` 导出，**不要直接改**（下次导出会覆盖）。
+- **只有 `main` 能创建非 prerelease 的 Release**。App 的「检查更新」请求 `releases/latest`，任何新 Release 都会顶掉它；那个 Release 上没有 `update.json` 与 `.apk` 时，安卓端在线更新立刻失效。iOS / 插件如确需发布，必须勾 **pre-release** 或存为 draft。
+- 合并完的 feature 分支当次删除，不囤分支；历史靠 tag 保留。
 
 ## 代码约定
 
