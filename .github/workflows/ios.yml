@@ -11,7 +11,7 @@ name: iOS CI
 
 on:
   push:
-    branches: [ios/port]
+    branches: [ios]
   workflow_dispatch:
     inputs:
       runner:

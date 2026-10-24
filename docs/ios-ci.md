@@ -25,7 +25,7 @@
 
 ## 2. 触发方式
 
-- **自动**：push 到 `ios/port` 分支（任何文件）。
+- **自动**：push 到 `ios` 分支（任何文件）。
 - **手动**：Actions 页面 -> iOS CI -> Run workflow（`workflow_dispatch`），可选参数：
 
 | 输入 | 默认 | 说明 |
@@ -324,7 +324,7 @@ bash tools/ios-ci/verdict.sh
   不写进 remote URL、不落盘到业务仓库；日志里由 Actions 自动打码。
 - 单文件推送上限 60MB（`ARTIFACT_MAX_BYTES`），避免撞 GitHub 100MB 硬上限；
   超大文件会被跳过并在日志里标注。
-- 产物只进 ci-artifacts 分支（孤儿提交 + force push），**绝不提交到 ios/port / main**。
+- 产物只进 ci-artifacts 分支（孤儿提交 + force push），**绝不提交到 ios / main**。
 
 ---
 
