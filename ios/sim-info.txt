@@ -1,0 +1,2 @@
+udid=48B2DA2E-AF18-4E36-BB25-B25969A4EBCF
+device=iOS-26-2 / iPhone SE (3rd generation)

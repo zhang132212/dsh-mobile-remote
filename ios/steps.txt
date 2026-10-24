@@ -1,0 +1,12 @@
+checkout=success
+env=success
+ios-project=success
+install-flutter=success
+pub-get=success
+analyze=success
+test=success
+build-device=success
+build-sim=success
+sim-smoke=success
+integration-test=success
+collect-artifacts=success

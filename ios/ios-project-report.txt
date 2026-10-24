@@ -1,0 +1,30 @@
+== iOS 工程配置检查（信息性）==
+
+-- 工程设置（project.pbxproj）--
+  PRODUCT_BUNDLE_IDENTIFIER = com.dsh.remote
+  PRODUCT_BUNDLE_IDENTIFIER = com.dsh.remote.RunnerTests
+  IPHONEOS_DEPLOYMENT_TARGET = 15.0
+  SWIFT_VERSION = 5.0
+
+-- Info.plist --
+  NSAppTransportSecurity         OK
+  NSLocalNetworkUsageDescription OK
+  NSCameraUsageDescription       OK
+  NSPhotoLibraryUsageDescription OK
+  CFBundleDocumentTypes          OK
+  CFBundleDisplayName            OK
+  CFBundleDisplayName 值: DSH Remote
+  ATS: NSAllowsArbitraryLoads=True
+  ATS: 无 NSAllowsLocalNetworking —— 按设计（iOS 10+ 两者同设时 ArbitraryLoads 会被忽略，本 App 需连用户自填任意地址，故只保留 ArbitraryLoads=true）
+  文档类型: Markdown Document ['net.daringfireball.markdown']
+  文档类型: Plain Text Document ['public.plain-text']
+  文档类型: Word Document ['org.openxmlformats.wordprocessingml.document']
+  文档类型: Excel Workbook ['org.openxmlformats.spreadsheetml.sheet']
+
+-- 应用图标 --
+  PNG 数量: 15
+   1024 图标: 存在
+
+-- Podfile / SPM --
+  Podfile 不存在 —— SPM 模式预期（Flutter 3.47 默认 Swift Package Manager，无 Podfile；ios/Flutter/ephemeral 下生成 SPM 包）
+  SPM 生成包尚未生成（flutter build ios 时自动生成）

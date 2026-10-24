@@ -1,0 +1,198 @@
+{
+  "repository": "zhang132212/dsh-mobile-remote",
+  "ref": "ios",
+  "commit": "6b8c1c9746382bb31aae6e0e3d5af8601c4fd4cf",
+  "commit_short": "6b8c1c97",
+  "run_id": "40089108312",
+  "run_attempt": "1",
+  "event": "push",
+  "run_url": "https://github.com/zhang132212/dsh-mobile-remote/actions/runs/40089108312",
+  "status": "success",
+  "flutter_version": "3.47.7",
+  "generated_at": "2026-10-24T11:25:46Z",
+  "jobs": {
+    "ios": {
+      "job_result": "success",
+      "evidence_status": "success",
+      "steps": {
+        "checkout": "success",
+        "env": "success",
+        "ios-project": "success",
+        "install-flutter": "success",
+        "pub-get": "success",
+        "analyze": "success",
+        "test": "success",
+        "build-device": "success",
+        "build-sim": "success",
+        "sim-smoke": "success",
+        "integration-test": "success",
+        "collect-artifacts": "success"
+      },
+      "smoke": {
+        "udid": "48B2DA2E-AF18-4E36-BB25-B25969A4EBCF",
+        "simulator": "iOS-26-2 / iPhone SE (3rd generation)",
+        "bundle_id": "com.dsh.remote",
+        "pid": "14602",
+        "launch_call_ms": "8108",
+        "first_frame_elapsed_ms": "19919",
+        "app_container": "/Users/runner/Library/Developer/CoreSimulator/Devices/48B2DA2E-AF18-4E36-BB25-B25969A4EBCF/data/Containers/Bundle/Application/B9CE6209-1EA1-4CD1-ADC1-91183DB0DDD4/Runner.app",
+        "sim_app_bytes": "192036864",
+        "sim_app_human": "183M",
+        "runner_binary_bytes": "123136",
+        "impeller_log": "1",
+        "impeller_snippet": "2026-10-24 11:21:54.508 Df Runner[14602:ce0b] (Flutter) [IMPORTANT:flutter/shell/platform/darwin/graphics/FlutterDarwinContextMetalImpeller.mm(45)] Using the Impeller rendering backend (Metal).",
+        "wait_seconds": "12",
+        "screenshot": "smoke.png",
+        "screenshot_bytes": "63220",
+        "alive": "yes",
+        "keep_booted": "yes"
+      },
+      "sizes": {
+        "device_app_bytes": "24936448",
+        "device_app_human": " 24M",
+        "sim_app_bytes": "148918272",
+        "sim_app_human": "142M",
+        "device_zip_bytes": "12701696",
+        "device_zip_human": " 12M"
+      }
+    },
+    "android": {
+      "job_result": "success",
+      "evidence_status": "success",
+      "steps": {},
+      "smoke": {},
+      "sizes": {
+        "apk_outcome": "success",
+        "apk_bytes": "81166174",
+        "apk_human": "78M"
+      }
+    }
+  },
+  "artifacts": [
+    {
+      "path": "ios/Runner-device-release.app.zip",
+      "bytes": 11742652
+    },
+    {
+      "path": "ios/build.log",
+      "bytes": 114949
+    },
+    {
+      "path": "ios/sim-devices.json",
+      "bytes": 71890
+    },
+    {
+      "path": "ios/smoke.png",
+      "bytes": 63220
+    },
+    {
+      "path": "android/build.log",
+      "bytes": 11739
+    },
+    {
+      "path": "ios/sim-devices.txt",
+      "bytes": 10321
+    },
+    {
+      "path": "ios/artifact-manifest.txt",
+      "bytes": 3631
+    },
+    {
+      "path": "summary.md",
+      "bytes": 2775
+    },
+    {
+      "path": "ios/summary.md",
+      "bytes": 2155
+    },
+    {
+      "path": "ios/ios-project-report.txt",
+      "bytes": 1307
+    },
+    {
+      "path": "README.md",
+      "bytes": 901
+    },
+    {
+      "path": "ios/smoke.txt",
+      "bytes": 744
+    },
+    {
+      "path": "android/artifact-manifest.txt",
+      "bytes": 732
+    },
+    {
+      "path": "android/summary.md",
+      "bytes": 328
+    },
+    {
+      "path": "build.log",
+      "bytes": 226
+    },
+    {
+      "path": "ios/steps.txt",
+      "bytes": 226
+    },
+    {
+      "path": "ios/env.txt",
+      "bytes": 217
+    },
+    {
+      "path": "ios/impeller.log",
+      "bytes": 194
+    },
+    {
+      "path": "ios/sizes.txt",
+      "bytes": 139
+    },
+    {
+      "path": "ios/sim-info.txt",
+      "bytes": 87
+    },
+    {
+      "path": "android/sizes.txt",
+      "bytes": 53
+    },
+    {
+      "path": "ios/sim-desc.txt",
+      "bytes": 38
+    },
+    {
+      "path": "ios/sim-udid.txt",
+      "bytes": 37
+    },
+    {
+      "path": "status.txt",
+      "bytes": 8
+    },
+    {
+      "path": "android/status.txt",
+      "bytes": 8
+    },
+    {
+      "path": "ios/status.txt",
+      "bytes": 8
+    },
+    {
+      "path": "ios/failed-steps.txt",
+      "bytes": 6
+    },
+    {
+      "path": "ios/allowed-steps.txt",
+      "bytes": 6
+    },
+    {
+      "path": "failed-steps.txt",
+      "bytes": 0
+    },
+    {
+      "path": "allowed-steps.txt",
+      "bytes": 0
+    },
+    {
+      "path": "ios/test-failures.txt",
+      "bytes": 0
+    }
+  ],
+  "note": "由 .github/workflows/ios.yml 自动生成；本分支只存 CI 产物，勿合并回业务分支。"
+}

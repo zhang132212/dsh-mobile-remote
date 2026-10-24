@@ -1,0 +1,19 @@
+# Android release APK 回归构建产物清单
+
+- 生成时间: 2026-10-24T11:21:51Z
+- 仓库: zhang132212/dsh-mobile-remote　ref: ios
+- commit: 6b8c1c9746382bb31aae6e0e3d5af8601c4fd4cf　run: 40089108312 attempt 1
+
+## APK
+- path: dsh-mobile-app/build/app/outputs/flutter-apk/app-release.apk
+- size: 78M
+- bytes: 81166174
+- sha256: 5ddefc1f6e827b45bcac81b7716de4203d795e2912e9abb3b34cbead009607a7
+- file: Android package (APK), with gradle app-metadata.properties
+
+## 输出目录
+total 79276
+drwxr-xr-x 2 runner runner     4096 Oct 24 11:21 .
+drwxr-xr-x 8 runner runner     4096 Oct 24 11:21 ..
+-rw-r--r-- 1 runner runner 81166174 Oct 24 11:21 app-release.apk
+-rw-r--r-- 1 runner runner       40 Oct 24 11:21 app-release.apk.sha1
