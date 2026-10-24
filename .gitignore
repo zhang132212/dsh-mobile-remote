@@ -21,3 +21,6 @@ AGENT-RULES.md
 # 发布产物（由 tools/publish-manifest.mjs 生成，不进 git）
 update.json
 *.tgz
+
+# plugin 分支不留 App 工程（这份规则只在本分支生效）
+/dsh-mobile-app/
