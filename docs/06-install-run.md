@@ -338,7 +338,7 @@ flutter build ios --simulator --debug         # 模拟器版，用于冒烟
 - [x] `/m/qr.png` 返回 PNG
 - [x] 桌面设置页「连接移动端设备」二维码 + App 扫码自动连接
 - [x] Flutter App（Android）：analyze 零问题 + 正式签名 release 构建 + 真机全流程测试
-- [ ] Flutter App（iOS，待 CI 证据回填后勾选）：macOS CI `flutter build ios --release --no-codesign` + 模拟器冒烟 + 全量测试（见 docs/ios-ci.md）
+- [x] Flutter App（iOS）：macOS CI 全绿 —— analyze / 全量测试 / 设备版 release 构建（`--no-codesign`）/ 模拟器构建 + 冒烟（截图/首帧/Impeller）/ integration_test 端到端；Android 回归 APK 亦通过（证据见 docs/ios-ci.md，验收 tag `ios-port-v4`）
 - [x] 问询弹窗端到端（手机选选项→agent 收到答案 / ✕→取消 / PC 端先答两端同步）
 - [x] 权限审批弹窗端到端（允许一次→操作继续 / 拒绝→操作被拒）
 - [x] 通知删除（单删/批量/清空）+ 诊断页服务探针（respondBridge/frameBridge ✅）
