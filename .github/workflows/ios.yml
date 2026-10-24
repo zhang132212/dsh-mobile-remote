@@ -132,6 +132,51 @@ jobs:
           printf '\n===== STEP build-device  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
           flutter build ios --release --no-codesign 2>&1 | tee -a "$BUILD_LOG"
 
+      # ── IPA 打包 / 发布（供 AltStore、Sideloadly 等自签安装）────────────────────
+      - name: 打包未签名 IPA（Payload/Runner.app → .ipa）
+        id: ipa
+        if: steps.build_device.outcome == 'success'
+        continue-on-error: true
+        working-directory: dsh-mobile-app
+        run: |
+          set -uo pipefail
+          printf '\n===== STEP package-ipa  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
+          APP="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP" ]; then echo '❌ 未找到设备版 Runner.app，跳过 IPA 打包' | tee -a "$BUILD_LOG"; exit 1; fi
+          rm -rf /tmp/ipa-payload
+          mkdir -p /tmp/ipa-payload/Payload
+          cp -R "$APP" /tmp/ipa-payload/Payload/
+          ( cd /tmp/ipa-payload && zip -qry "$GITHUB_WORKSPACE/DSH-Remote-unsigned.ipa" Payload )
+          ls -lh "$GITHUB_WORKSPACE/DSH-Remote-unsigned.ipa" | tee -a "$BUILD_LOG"
+          unzip -l "$GITHUB_WORKSPACE/DSH-Remote-unsigned.ipa" | head -8 | tee -a "$BUILD_LOG"
+
+      - name: 上传未签名 IPA（Actions artifact，需登录下载）
+        id: ipa_artifact
+        if: steps.build_device.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-ipa
+          path: DSH-Remote-unsigned.ipa
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: 发布/更新 ios-unsigned Release（公开下载，免登录）
+        id: ipa_release
+        if: steps.build_device.outcome == 'success'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          if ! gh release view ios-unsigned >/dev/null 2>&1; then
+            gh release create ios-unsigned \
+              --target "$GITHUB_SHA" \
+              --title 'iOS 未签名 IPA（自动构建）' \
+              --notes '由 GitHub Actions 自动构建的未签名 IPA。安装需用 AltStore / Sideloadly 自签（个人 Apple ID 即可）。详见 docs/ios-unsigned-ipa.md。' \
+              --prerelease
+          fi
+          gh release upload ios-unsigned DSH-Remote-unsigned.ipa --clobber
       - name: 构建模拟器版 flutter build ios --simulator --debug
         id: build_sim
         if: always() && steps.pub.outcome == 'success'
