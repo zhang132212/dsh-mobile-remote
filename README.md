@@ -150,6 +150,9 @@ agent 写完代码，对话末尾出现「本轮改动」卡片：改了 N 个�
 ```powershell
 # 1) 装插件（tag 锁定版本；也可下载 Release 里的 .tgz 本地安装）
 dsh plugin add github:zhang132212/dsh-mobile-remote#v3.2.15
+
+# 只要插件、不想拉整个 App 工程
+dsh plugin add github:zhang132212/dsh-mobile-remote#plugin
 ```
 
 在 `cordis.patch.yml` 里启用并配置：
