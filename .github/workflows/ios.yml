@@ -1,55 +1,46 @@
-# iOS 移植 CI：macOS 构建 + 模拟器冒烟 + Android 回归 + 证据回传
+﻿# iOS 绉绘 CI锛歮acOS 鏋勫缓 + 妯℃嫙鍣ㄥ啋鐑?+ Android 鍥炲綊 + 璇佹嵁鍥炰紶
 #
-# 结构：
-#   ios      —— macOS runner：pub get / analyze / test / 设备版 release 构建 / 模拟器 debug 构建 / 模拟器冒烟截图
-#   android  —— ubuntu runner：flutter build apk --release（证明 Dart 侧改动没有破坏 Android 构建；非阻塞）
-#   report   —— 汇总两个 job 的证据，一次性回传到 ci-artifacts 分支（孤儿提交，只放产物）
-#
-# 产物回传失败也照常回传（if: always()）；业务分支不受影响。
-# 说明文档：docs/ios-ci.md
+# 缁撴瀯锛?#   ios      鈥斺€?macOS runner锛歱ub get / analyze / test / 璁惧鐗?release 鏋勫缓 / 妯℃嫙鍣?debug 鏋勫缓 / 妯℃嫙鍣ㄥ啋鐑熸埅鍥?#   android  鈥斺€?ubuntu runner锛歠lutter build apk --release锛堣瘉鏄?Dart 渚ф敼鍔ㄦ病鏈夌牬鍧?Android 鏋勫缓锛涢潪闃诲锛?#   report   鈥斺€?姹囨€讳袱涓?job 鐨勮瘉鎹紝涓€娆℃€у洖浼犲埌 ci-artifacts 鍒嗘敮锛堝鍎挎彁浜わ紝鍙斁浜х墿锛?#
+# 浜х墿鍥炰紶澶辫触涔熺収甯稿洖浼狅紙if: always()锛夛紱涓氬姟鍒嗘敮涓嶅彈褰卞搷銆?# 璇存槑鏂囨。锛歞ocs/ios-ci.md
 name: iOS CI
 
 on:
   push:
-    branches: [ios/port]
+    branches: [ios/port, ci/ipa]
   workflow_dispatch:
     inputs:
       runner:
-        description: "macOS runner 标签（默认 macos-15；备选 macos-14 / macos-26）"
+        description: "macOS runner 鏍囩锛堥粯璁?macos-15锛涘閫?macos-14 / macos-26锛?
         type: string
         default: macos-15
       xcode_app:
-        description: "可选：Xcode.app 绝对路径；留空用 runner 默认 Xcode"
+        description: "鍙€夛細Xcode.app 缁濆璺緞锛涚暀绌虹敤 runner 榛樿 Xcode"
         type: string
         default: ""
       allow_test_failures:
-        description: "排障用：flutter test 失败也判本 job 成功（默认 false）"
+        description: "鎺掗殰鐢細flutter test 澶辫触涔熷垽鏈?job 鎴愬姛锛堥粯璁?false锛?
         type: boolean
         default: false
       skip_android:
-        description: "排障用：跳过 Android 回归构建（默认 false，正常运行）"
+        description: "鎺掗殰鐢細璺宠繃 Android 鍥炲綊鏋勫缓锛堥粯璁?false锛屾甯歌繍琛岋級"
         type: boolean
         default: false
 
 permissions:
-  contents: write          # 回传 ci-artifacts 分支需要
-
+  contents: write          # 鍥炰紶 ci-artifacts 鍒嗘敮闇€瑕?
 concurrency:
   group: ios-ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  FLUTTER_VERSION: "3.47.7"     # 与本地 SDK 一致（stable / Dart 3.13.5）
-  APP_DIR: "dsh-mobile-app"
+  FLUTTER_VERSION: "3.47.7"     # 涓庢湰鍦?SDK 涓€鑷达紙stable / Dart 3.13.5锛?  APP_DIR: "dsh-mobile-app"
   ARTIFACTS_BRANCH: "ci-artifacts"
 
 jobs:
-  # ────────────────────────────────────────────────────────────────────────────
-  # 1) iOS：macOS 构建 + 模拟器冒烟
-  # ────────────────────────────────────────────────────────────────────────────
+  # 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  # 1) iOS锛歮acOS 鏋勫缓 + 妯℃嫙鍣ㄥ啋鐑?  # 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   ios:
-    name: iOS 构建 + 模拟器冒烟（macOS）
-    runs-on: ${{ github.event.inputs.runner || 'macos-15' }}
+    name: iOS 鏋勫缓 + 妯℃嫙鍣ㄥ啋鐑燂紙macOS锛?    runs-on: ${{ github.event.inputs.runner || 'macos-15' }}
     timeout-minutes: 100
     env:
       CI_OUT: ${{ github.workspace }}/ci-out
@@ -61,8 +52,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Windows 侧 core.autocrlf=true，工具脚本可能以 CRLF 提交；这里统一成 LF（幂等）。
-      - name: 规范化 CI 脚本换行
+      # Windows 渚?core.autocrlf=true锛屽伐鍏疯剼鏈彲鑳戒互 CRLF 鎻愪氦锛涜繖閲岀粺涓€鎴?LF锛堝箓绛夛級銆?      - name: 瑙勮寖鍖?CI 鑴氭湰鎹㈣
         if: always() && steps.checkout.outcome == 'success'
         run: |
           set -uo pipefail
@@ -72,36 +62,32 @@ jobs:
             sed -i '' 's/\r$//' "$f" 2>/dev/null || sed -i 's/\r$//' "$f" 2>/dev/null || true
           done
           chmod +x tools/ios-ci/*.sh 2>/dev/null || true
-          echo "CI 脚本换行已规范化（幂等）" > "$BUILD_LOG"
+          echo "CI 鑴氭湰鎹㈣宸茶鑼冨寲锛堝箓绛夛級" > "$BUILD_LOG"
 
-      - name: 环境信息（macOS / Xcode / 模拟器 / CocoaPods）
-        id: env
+      - name: 鐜淇℃伅锛坢acOS / Xcode / 妯℃嫙鍣?/ CocoaPods锛?        id: env
         if: always() && steps.checkout.outcome == 'success'
         env:
           XCODE_APP: ${{ github.event.inputs.xcode_app }}
         run: bash tools/ios-ci/check-env.sh
 
-      # 工程缺失（pbxproj 不存在）时直接失败：此时构建也必然失败，早点暴露省时间
-      - name: iOS 工程配置检查（工程缺失则失败；其余项仅记录）
-        id: ios_project
+      # 宸ョ▼缂哄け锛坧bxproj 涓嶅瓨鍦級鏃剁洿鎺ュけ璐ワ細姝ゆ椂鏋勫缓涔熷繀鐒跺け璐ワ紝鏃╃偣鏆撮湶鐪佹椂闂?      - name: iOS 宸ョ▼閰嶇疆妫€鏌ワ紙宸ョ▼缂哄け鍒欏け璐ワ紱鍏朵綑椤逛粎璁板綍锛?        id: ios_project
         if: always() && steps.checkout.outcome == 'success'
         run: bash tools/ios-ci/check-ios-project.sh
 
-      - name: 安装 Flutter 3.47.7（subosito/flutter-action，带缓存）
-        id: install
+      - name: 瀹夎 Flutter 3.47.7锛坰ubosito/flutter-action锛屽甫缂撳瓨锛?        id: install
         uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.47.7"
           channel: stable
           cache: true
 
-      - name: 依赖解析 flutter pub get
+      - name: 渚濊禆瑙ｆ瀽 flutter pub get
         id: pub
         if: always() && steps.install.outcome == 'success'
         continue-on-error: true
         run: bash tools/ios-ci/pub-get.sh
 
-      - name: 静态分析 flutter analyze
+      - name: 闈欐€佸垎鏋?flutter analyze
         id: analyze
         if: always() && steps.pub.outcome == 'success'
         continue-on-error: true
@@ -111,7 +97,7 @@ jobs:
           printf '\n===== STEP analyze  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
           flutter analyze --no-pub 2>&1 | tee -a "$BUILD_LOG"
 
-      - name: 测试 flutter test（全量测试）
+      - name: 娴嬭瘯 flutter test锛堝叏閲忔祴璇曪級
         id: test
         if: always() && steps.pub.outcome == 'success'
         continue-on-error: true
@@ -119,10 +105,9 @@ jobs:
         run: |
           set -uo pipefail
           printf '\n===== STEP test  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
-          rm -rf test/failures   # 仓库提交过历史 golden 失败图，先清掉，确保 failures 只含本次产生的
-          flutter test --no-pub --reporter expanded 2>&1 | tee -a "$BUILD_LOG"
+          rm -rf test/failures   # 浠撳簱鎻愪氦杩囧巻鍙?golden 澶辫触鍥撅紝鍏堟竻鎺夛紝纭繚 failures 鍙惈鏈浜х敓鐨?          flutter test --no-pub --reporter expanded 2>&1 | tee -a "$BUILD_LOG"
 
-      - name: 构建设备版 flutter build ios --release --no-codesign
+      - name: 鏋勫缓璁惧鐗?flutter build ios --release --no-codesign
         id: build_device
         if: always() && steps.pub.outcome == 'success'
         continue-on-error: true
@@ -132,9 +117,8 @@ jobs:
           printf '\n===== STEP build-device  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
           flutter build ios --release --no-codesign 2>&1 | tee -a "$BUILD_LOG"
 
-      # ── IPA 打包 / 发布（供 AltStore、Sideloadly 等自签安装）────────────────────
-      - name: 打包未签名 IPA（Payload/Runner.app → .ipa）
-        id: ipa
+      # 鈹€鈹€ IPA 鎵撳寘 / 鍙戝竷锛堜緵 AltStore銆丼ideloadly 绛夎嚜绛惧畨瑁咃級鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+      - name: 鎵撳寘鏈鍚?IPA锛圥ayload/Runner.app 鈫?.ipa锛?        id: ipa
         if: steps.build_device.outcome == 'success'
         continue-on-error: true
         working-directory: dsh-mobile-app
@@ -142,7 +126,7 @@ jobs:
           set -uo pipefail
           printf '\n===== STEP package-ipa  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
           APP="build/ios/iphoneos/Runner.app"
-          if [ ! -d "$APP" ]; then echo '❌ 未找到设备版 Runner.app，跳过 IPA 打包' | tee -a "$BUILD_LOG"; exit 1; fi
+          if [ ! -d "$APP" ]; then echo '鉂?鏈壘鍒拌澶囩増 Runner.app锛岃烦杩?IPA 鎵撳寘' | tee -a "$BUILD_LOG"; exit 1; fi
           rm -rf /tmp/ipa-payload
           mkdir -p /tmp/ipa-payload/Payload
           cp -R "$APP" /tmp/ipa-payload/Payload/
@@ -150,8 +134,7 @@ jobs:
           ls -lh "$GITHUB_WORKSPACE/DSH-Remote-unsigned.ipa" | tee -a "$BUILD_LOG"
           unzip -l "$GITHUB_WORKSPACE/DSH-Remote-unsigned.ipa" | head -8 | tee -a "$BUILD_LOG"
 
-      - name: 上传未签名 IPA（Actions artifact，需登录下载）
-        id: ipa_artifact
+      - name: 涓婁紶鏈鍚?IPA锛圓ctions artifact锛岄渶鐧诲綍涓嬭浇锛?        id: ipa_artifact
         if: steps.build_device.outcome == 'success'
         continue-on-error: true
         uses: actions/upload-artifact@v4
@@ -161,8 +144,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: 发布/更新 ios-unsigned Release（公开下载，免登录）
-        id: ipa_release
+      - name: 鍙戝竷/鏇存柊 ios-unsigned Release锛堝叕寮€涓嬭浇锛屽厤鐧诲綍锛?        id: ipa_release
         if: steps.build_device.outcome == 'success'
         continue-on-error: true
         env:
@@ -172,12 +154,12 @@ jobs:
           if ! gh release view ios-unsigned >/dev/null 2>&1; then
             gh release create ios-unsigned \
               --target "$GITHUB_SHA" \
-              --title 'iOS 未签名 IPA（自动构建）' \
-              --notes '由 GitHub Actions 自动构建的未签名 IPA。安装需用 AltStore / Sideloadly 自签（个人 Apple ID 即可）。详见 docs/ios-unsigned-ipa.md。' \
+              --title 'iOS 鏈鍚?IPA锛堣嚜鍔ㄦ瀯寤猴級' \
+              --notes '鐢?GitHub Actions 鑷姩鏋勫缓鐨勬湭绛惧悕 IPA銆傚畨瑁呴渶鐢?AltStore / Sideloadly 鑷锛堜釜浜?Apple ID 鍗冲彲锛夈€傝瑙?docs/ios-unsigned-ipa.md銆? \
               --prerelease
           fi
           gh release upload ios-unsigned DSH-Remote-unsigned.ipa --clobber
-      - name: 构建模拟器版 flutter build ios --simulator --debug
+      - name: 鏋勫缓妯℃嫙鍣ㄧ増 flutter build ios --simulator --debug
         id: build_sim
         if: always() && steps.pub.outcome == 'success'
         continue-on-error: true
@@ -185,18 +167,17 @@ jobs:
         run: |
           set -uo pipefail
           printf '\n===== STEP build-sim  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
-          # 设备版 Runner.app 不能装进模拟器，冒烟必须用 iphonesimulator 产物
+          # 璁惧鐗?Runner.app 涓嶈兘瑁呰繘妯℃嫙鍣紝鍐掔儫蹇呴』鐢?iphonesimulator 浜х墿
           flutter build ios --simulator --debug 2>&1 | tee -a "$BUILD_LOG"
 
-      - name: iOS Simulator 冒烟（启动 / 安装 / 启动 App / 首帧计时 / 截图 / 存活校验）
-        id: smoke
+      - name: iOS Simulator 鍐掔儫锛堝惎鍔?/ 瀹夎 / 鍚姩 App / 棣栧抚璁℃椂 / 鎴浘 / 瀛樻椿鏍￠獙锛?        id: smoke
         if: always() && steps.build_sim.outcome == 'success'
         continue-on-error: true
         env:
           SMOKE_WAIT_SEC: "12"
         run: bash tools/ios-ci/sim-smoke.sh
 
-      - name: 集成测试 flutter test integration_test（复用冒烟用模拟器）
+      - name: 闆嗘垚娴嬭瘯 flutter test integration_test锛堝鐢ㄥ啋鐑熺敤妯℃嫙鍣級
         id: integration
         if: always() && steps.build_sim.outcome == 'success'
         continue-on-error: true
@@ -206,29 +187,28 @@ jobs:
           set -uo pipefail
           printf '\n===== STEP integration-test  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
           if [ ! -d integration_test ]; then
-            echo "integration_test/ 目录不存在，跳过（dart-platform 提交后自动生效）" | tee -a "$BUILD_LOG"
+            echo "integration_test/ 鐩綍涓嶅瓨鍦紝璺宠繃锛坉art-platform 鎻愪氦鍚庤嚜鍔ㄧ敓鏁堬級" | tee -a "$BUILD_LOG"
             exit 0
           fi
-          # UDID 来源：sim-smoke.sh 先写 sim-info.txt（udid= 键值），再写 sim-udid.txt（裸 UDID 一行）
+          # UDID 鏉ユ簮锛歴im-smoke.sh 鍏堝啓 sim-info.txt锛坲did= 閿€硷級锛屽啀鍐?sim-udid.txt锛堣８ UDID 涓€琛岋級
           UDID="$(sed -n 's/^udid=//p' "$CI_OUT/sim-info.txt" 2>/dev/null | head -1)"
           [ -n "$UDID" ] || UDID="$(head -1 "$CI_OUT/sim-udid.txt" 2>/dev/null || true)"
           UDID="$(printf '%s' "$UDID" | tr -d '[:space:]')"
           if [ -z "$UDID" ]; then
-            echo "❌ 无法定位冒烟用的模拟器 UDID（sim-info.txt / sim-udid.txt 均不可用）；不做 name 兜底，直接失败以免跑错设备" | tee -a "$BUILD_LOG"
+            echo "鉂?鏃犳硶瀹氫綅鍐掔儫鐢ㄧ殑妯℃嫙鍣?UDID锛坰im-info.txt / sim-udid.txt 鍧囦笉鍙敤锛夛紱涓嶅仛 name 鍏滃簳锛岀洿鎺ュけ璐ヤ互鍏嶈窇閿欒澶? | tee -a "$BUILD_LOG"
             exit 1
           fi
-          echo "使用冒烟步骤启动的模拟器 UDID: $UDID" | tee -a "$BUILD_LOG"
+          echo "浣跨敤鍐掔儫姝ラ鍚姩鐨勬ā鎷熷櫒 UDID: $UDID" | tee -a "$BUILD_LOG"
           xcrun simctl list devices booted 2>&1 | tee -a "$BUILD_LOG" || true
           flutter test integration_test -d "$UDID" --reporter expanded 2>&1 | tee -a "$BUILD_LOG"
 
-      - name: 收集产物（清单 / 日志 / 截图 / golden 失败图）
+      - name: 鏀堕泦浜х墿锛堟竻鍗?/ 鏃ュ織 / 鎴浘 / golden 澶辫触鍥撅級
         id: collect
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
         run: bash tools/ios-ci/collect-artifacts.sh
 
-      - name: 汇总 iOS 结果（写 status.txt / summary.md）
-        id: verdict
+      - name: 姹囨€?iOS 缁撴灉锛堝啓 status.txt / summary.md锛?        id: verdict
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
         env:
@@ -248,11 +228,8 @@ jobs:
           ALLOW_FAIL_STEPS: "integration-test"
         run: bash tools/ios-ci/verdict.sh
 
-      # 兜底通道：即使 report job / artifact 传递出问题，也能从 ci-artifacts-ios 分支拿到 iOS 全量日志。
-      # 只推小文件（阈值 8MB），并显式排除 *.zip 归档（设备版 .app 约 12MB，不该重复推）；
-      # 正式证据仍以 report job 的 ci-artifacts 为准。
-      - name: 兜底回传 iOS 证据（直传 ci-artifacts-ios 分支）
-        id: publish_fallback
+      # 鍏滃簳閫氶亾锛氬嵆浣?report job / artifact 浼犻€掑嚭闂锛屼篃鑳戒粠 ci-artifacts-ios 鍒嗘敮鎷垮埌 iOS 鍏ㄩ噺鏃ュ織銆?      # 鍙帹灏忔枃浠讹紙闃堝€?8MB锛夛紝骞舵樉寮忔帓闄?*.zip 褰掓。锛堣澶囩増 .app 绾?12MB锛屼笉璇ラ噸澶嶆帹锛夛紱
+      # 姝ｅ紡璇佹嵁浠嶄互 report job 鐨?ci-artifacts 涓哄噯銆?      - name: 鍏滃簳鍥炰紶 iOS 璇佹嵁锛堢洿浼?ci-artifacts-ios 鍒嗘敮锛?        id: publish_fallback
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
         env:
@@ -262,7 +239,7 @@ jobs:
           ARTIFACT_SKIP_GLOBS: "*.zip"
         run: bash tools/ios-ci/publish-artifacts.sh
 
-      - name: 上传 iOS 证据（交给 report job 汇总回传）
+      - name: 涓婁紶 iOS 璇佹嵁锛堜氦缁?report job 姹囨€诲洖浼狅級
         id: upload
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
@@ -273,12 +250,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # 2) Android：release APK 回归构建（非阻塞，失败不影响 iOS 结论）
-  # ────────────────────────────────────────────────────────────────────────────
+  # 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  # 2) Android锛歳elease APK 鍥炲綊鏋勫缓锛堥潪闃诲锛屽け璐ヤ笉褰卞搷 iOS 缁撹锛?  # 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   android:
-    name: Android release APK 回归（ubuntu）
-    runs-on: ubuntu-latest
+    name: Android release APK 鍥炲綊锛坲buntu锛?    runs-on: ubuntu-latest
     timeout-minutes: 45
     continue-on-error: true
     if: ${{ github.event.inputs.skip_android != 'true' }}
@@ -292,7 +267,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: 规范化 CI 脚本换行
+      - name: 瑙勮寖鍖?CI 鑴氭湰鎹㈣
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
         run: |
@@ -303,10 +278,9 @@ jobs:
             sed -i '' 's/\r$//' "$f" 2>/dev/null || sed -i 's/\r$//' "$f" 2>/dev/null || true
           done
           chmod +x tools/ios-ci/*.sh 2>/dev/null || true
-          echo "CI 脚本换行已规范化（幂等）" > "$BUILD_LOG"
+          echo "CI 鑴氭湰鎹㈣宸茶鑼冨寲锛堝箓绛夛級" > "$BUILD_LOG"
 
-      # 工程用 AGP 9.1.0 / Gradle 9.5.0；JDK 21 同时满足 AGP 与 Gradle 要求（JDK 17 亦可用，选 21 更稳）
-      - name: 安装 JDK 21
+      # 宸ョ▼鐢?AGP 9.1.0 / Gradle 9.5.0锛汮DK 21 鍚屾椂婊¤冻 AGP 涓?Gradle 瑕佹眰锛圝DK 17 浜﹀彲鐢紝閫?21 鏇寸ǔ锛?      - name: 瀹夎 JDK 21
         id: java
         continue-on-error: true
         uses: actions/setup-java@v4
@@ -314,8 +288,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: 记录 Android 工具链版本（JDK / Gradle / SDK）
-        id: toolchain
+      - name: 璁板綍 Android 宸ュ叿閾剧増鏈紙JDK / Gradle / SDK锛?        id: toolchain
         continue-on-error: true
         run: |
           set -uo pipefail
@@ -326,7 +299,7 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_HOME:-} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}" | tee -a "$BUILD_LOG"
           grep -o 'com.android.application[^\"]*' dsh-mobile-app/android/settings.gradle.kts 2>/dev/null | head -1 | tee -a "$BUILD_LOG" || true
 
-      - name: 安装 Flutter 3.47.7
+      - name: 瀹夎 Flutter 3.47.7
         id: install
         continue-on-error: true
         uses: subosito/flutter-action@v2
@@ -335,7 +308,7 @@ jobs:
           channel: stable
           cache: true
 
-      - name: 缓存 Gradle 依赖
+      - name: 缂撳瓨 Gradle 渚濊禆
         uses: actions/cache@v4
         with:
           path: |
@@ -344,13 +317,13 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('dsh-mobile-app/android/**/*.gradle*', 'dsh-mobile-app/android/**/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
-      - name: 依赖解析 flutter pub get
+      - name: 渚濊禆瑙ｆ瀽 flutter pub get
         id: pub
         if: always() && steps.install.outcome == 'success'
         continue-on-error: true
         run: bash tools/ios-ci/pub-get.sh
 
-      - name: 构建 Android release APK（回归验证）
+      - name: 鏋勫缓 Android release APK锛堝洖褰掗獙璇侊級
         id: build_apk
         if: always() && steps.pub.outcome == 'success'
         continue-on-error: true
@@ -358,14 +331,10 @@ jobs:
         run: |
           set -uo pipefail
           printf '\n===== STEP build-apk  %s =====\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$BUILD_LOG"
-          # v2 首跑实测根因：前一步 flutter pub get 以 releaseMode=false 生成 GeneratedPluginRegistrant.java
-          #（含 dev 依赖 integration_test），而 build 带 --no-pub 时不会以 releaseMode=true 重新注入插件，
-          # 于是 release 编译找不到 dev.flutter.plugins.integration_test。
-          # 修法（双保险）：
-          #   ① flutter build 不带 --no-pub（构建自己以 release 模式重新生成 registrant，过滤 dev 依赖）；
-          #   ② 仍临时摘掉 integration_test dev 依赖（lib/ 不允许 import dev 依赖，语义等价），
-          #      即使未来 Flutter 版本行为再变也能拿到干净的 release 编译证据；构建后立即恢复。
-          cp pubspec.yaml /tmp/pubspec.yaml.ci-bak
+          # v2 棣栬窇瀹炴祴鏍瑰洜锛氬墠涓€姝?flutter pub get 浠?releaseMode=false 鐢熸垚 GeneratedPluginRegistrant.java
+          #锛堝惈 dev 渚濊禆 integration_test锛夛紝鑰?build 甯?--no-pub 鏃朵笉浼氫互 releaseMode=true 閲嶆柊娉ㄥ叆鎻掍欢锛?          # 浜庢槸 release 缂栬瘧鎵句笉鍒?dev.flutter.plugins.integration_test銆?          # 淇硶锛堝弻淇濋櫓锛夛細
+          #   鈶?flutter build 涓嶅甫 --no-pub锛堟瀯寤鸿嚜宸变互 release 妯″紡閲嶆柊鐢熸垚 registrant锛岃繃婊?dev 渚濊禆锛夛紱
+          #   鈶?浠嶄复鏃舵憳鎺?integration_test dev 渚濊禆锛坙ib/ 涓嶅厑璁?import dev 渚濊禆锛岃涔夌瓑浠凤級锛?          #      鍗充娇鏈潵 Flutter 鐗堟湰琛屼负鍐嶅彉涔熻兘鎷垮埌骞插噣鐨?release 缂栬瘧璇佹嵁锛涙瀯寤哄悗绔嬪嵆鎭㈠銆?          cp pubspec.yaml /tmp/pubspec.yaml.ci-bak
           cp pubspec.lock /tmp/pubspec.lock.ci-bak
           awk '
             /^  integration_test:$/ { skip = 1; next }
@@ -373,21 +342,19 @@ jobs:
             { print }
           ' pubspec.yaml > /tmp/pubspec.yaml.ci-stripped
           if cmp -s pubspec.yaml /tmp/pubspec.yaml.ci-stripped; then
-            echo "⚠️ pubspec.yaml 未变化：未找到 integration_test 依赖，按原样构建" | tee -a "$BUILD_LOG"
+            echo "鈿狅笍 pubspec.yaml 鏈彉鍖栵細鏈壘鍒?integration_test 渚濊禆锛屾寜鍘熸牱鏋勫缓" | tee -a "$BUILD_LOG"
           else
             mv /tmp/pubspec.yaml.ci-stripped pubspec.yaml
-            echo "已临时移除 integration_test dev 依赖（仅 CI 工作区，构建后恢复）" | tee -a "$BUILD_LOG"
+            echo "宸蹭复鏃剁Щ闄?integration_test dev 渚濊禆锛堜粎 CI 宸ヤ綔鍖猴紝鏋勫缓鍚庢仮澶嶏級" | tee -a "$BUILD_LOG"
           fi
           flutter pub get 2>&1 | tee -a "$BUILD_LOG"
-          # 仓库没有 key.properties，release 会回退 debug 签名（见 android/app/build.gradle.kts），CI 可构建。
-          # 注意：不要加 --no-pub —— 必须让 build 以 release 模式重新注入插件（见上方根因说明）。
-          flutter build apk --release 2>&1 | tee -a "$BUILD_LOG"
+          # 浠撳簱娌℃湁 key.properties锛宺elease 浼氬洖閫€ debug 绛惧悕锛堣 android/app/build.gradle.kts锛夛紝CI 鍙瀯寤恒€?          # 娉ㄦ剰锛氫笉瑕佸姞 --no-pub 鈥斺€?蹇呴』璁?build 浠?release 妯″紡閲嶆柊娉ㄥ叆鎻掍欢锛堣涓婃柟鏍瑰洜璇存槑锛夈€?          flutter build apk --release 2>&1 | tee -a "$BUILD_LOG"
           RC=$?
           cp /tmp/pubspec.yaml.ci-bak pubspec.yaml
           cp /tmp/pubspec.lock.ci-bak pubspec.lock
           exit $RC
 
-      - name: 收集 Android 证据
+      - name: 鏀堕泦 Android 璇佹嵁
         id: collect
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
@@ -395,7 +362,7 @@ jobs:
           OUT_BUILD_APK: ${{ steps.build_apk.outcome }}
         run: bash tools/ios-ci/android-collect.sh
 
-      - name: 上传 Android 证据
+      - name: 涓婁紶 Android 璇佹嵁
         id: upload
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
@@ -406,11 +373,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # 3) report：汇总证据 -> 生成 summary/run.json -> 回传 ci-artifacts 分支
-  # ────────────────────────────────────────────────────────────────────────────
+  # 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  # 3) report锛氭眹鎬昏瘉鎹?-> 鐢熸垚 summary/run.json -> 鍥炰紶 ci-artifacts 鍒嗘敮
+  # 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   report:
-    name: 汇总证据并回传 ci-artifacts 分支
+    name: 姹囨€昏瘉鎹苟鍥炰紶 ci-artifacts 鍒嗘敮
     needs: [ios, android]
     if: always()
     runs-on: ubuntu-latest
@@ -428,7 +395,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: 规范化 CI 脚本换行
+      - name: 瑙勮寖鍖?CI 鑴氭湰鎹㈣
         if: always() && steps.checkout.outcome == 'success'
         run: |
           set -uo pipefail
@@ -438,7 +405,7 @@ jobs:
           done
           chmod +x tools/ios-ci/*.sh 2>/dev/null || true
 
-      - name: 下载 iOS 证据
+      - name: 涓嬭浇 iOS 璇佹嵁
         id: dl_ios
         if: always()
         continue-on-error: true
@@ -447,7 +414,7 @@ jobs:
           name: ios-evidence
           path: staging/ios
 
-      - name: 下载 Android 证据
+      - name: 涓嬭浇 Android 璇佹嵁
         id: dl_android
         if: always()
         continue-on-error: true
@@ -456,13 +423,12 @@ jobs:
           name: android-evidence
           path: staging/android
 
-      - name: 汇总证据（summary.md / run.json / status.txt / 目录结构）
-        id: assemble
+      - name: 姹囨€昏瘉鎹紙summary.md / run.json / status.txt / 鐩綍缁撴瀯锛?        id: assemble
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
         run: bash tools/ios-ci/assemble-report.sh
 
-      - name: 回传产物到 ci-artifacts 分支
+      - name: 鍥炰紶浜х墿鍒?ci-artifacts 鍒嗘敮
         id: publish
         if: always() && steps.checkout.outcome == 'success'
         continue-on-error: true
@@ -470,8 +436,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash tools/ios-ci/publish-artifacts.sh
 
-      - name: 结果门禁（iOS 红则整体红；Android 失败只记录不阻塞）
-        id: gate
+      - name: 缁撴灉闂ㄧ锛坕OS 绾㈠垯鏁翠綋绾紱Android 澶辫触鍙褰曚笉闃诲锛?        id: gate
         if: always()
         env:
           PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
@@ -479,23 +444,22 @@ jobs:
         run: |
           set -uo pipefail
           status="$(cat "$CI_OUT/status.txt" 2>/dev/null || echo failure)"
-          echo "iOS 结论: $status"
+          echo "iOS 缁撹: $status"
           echo "iOS job: ${IOS_JOB_RESULT:-unknown}"
           if [ "$status" != "success" ]; then
-            echo "失败 / 未完成步骤："
-            cat "$CI_OUT/failed-steps.txt" 2>/dev/null || echo "(无法读取 failed-steps.txt)"
+            echo "澶辫触 / 鏈畬鎴愭楠わ細"
+            cat "$CI_OUT/failed-steps.txt" 2>/dev/null || echo "(鏃犳硶璇诲彇 failed-steps.txt)"
             exit 1
           fi
           if [ "${IOS_JOB_RESULT:-}" != "success" ]; then
-            echo "❌ iOS job 结果不是 success"
+            echo "鉂?iOS job 缁撴灉涓嶆槸 success"
             exit 1
           fi
-          # 证据回传失败不影响构建结论（两者解绑）：只报警告，靠 ci-artifacts 分支是否更新来判断回传状态
-          if [ "${PUBLISH_OUTCOME:-}" != "success" ]; then
-            echo "::warning::证据回传（ci-artifacts 分支）未成功（PUBLISH_OUTCOME=${PUBLISH_OUTCOME:-missing}），但 iOS 构建结论不受影响；请检查仓库 Settings -> Actions -> General -> Workflow permissions（需 Read and write）或查看 report job 日志。"
+          # 璇佹嵁鍥炰紶澶辫触涓嶅奖鍝嶆瀯寤虹粨璁猴紙涓よ€呰В缁戯級锛氬彧鎶ヨ鍛婏紝闈?ci-artifacts 鍒嗘敮鏄惁鏇存柊鏉ュ垽鏂洖浼犵姸鎬?          if [ "${PUBLISH_OUTCOME:-}" != "success" ]; then
+            echo "::warning::璇佹嵁鍥炰紶锛坈i-artifacts 鍒嗘敮锛夋湭鎴愬姛锛圥UBLISH_OUTCOME=${PUBLISH_OUTCOME:-missing}锛夛紝浣?iOS 鏋勫缓缁撹涓嶅彈褰卞搷锛涜妫€鏌ヤ粨搴?Settings -> Actions -> General -> Workflow permissions锛堥渶 Read and write锛夋垨鏌ョ湅 report job 鏃ュ織銆?
             if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
               echo "" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
-              echo "> ⚠️ 证据回传未成功（PUBLISH_OUTCOME=${PUBLISH_OUTCOME:-missing}），不影响 iOS 结论；以 ci-artifacts 分支更新为准。" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+              echo "> 鈿狅笍 璇佹嵁鍥炰紶鏈垚鍔燂紙PUBLISH_OUTCOME=${PUBLISH_OUTCOME:-missing}锛夛紝涓嶅奖鍝?iOS 缁撹锛涗互 ci-artifacts 鍒嗘敮鏇存柊涓哄噯銆? >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
             fi
           fi
-          echo "✅ iOS 结论通过（证据回传状态见上方 warning，若无 warning 即为成功）"
+          echo "鉁?iOS 缁撹閫氳繃锛堣瘉鎹洖浼犵姸鎬佽涓婃柟 warning锛岃嫢鏃?warning 鍗充负鎴愬姛锛?
