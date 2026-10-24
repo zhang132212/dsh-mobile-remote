@@ -48,6 +48,11 @@ void main() {
         'http://example.com/x.docx',
         'https://raw.githubusercontent.com/o/r/main/d.xlsx',
         'https://example.com/note.txt',
+        // v3.2.11：数据结构 / 网页 / 矢量图也能就地读，不再甩给浏览器
+        'https://example.com/page.html',
+        'https://example.com/data.json',
+        'https://example.com/rss.xml',
+        'https://example.com/icon.svg',
       ]) {
         final t = parseDocLink(u);
         expect(t, isNotNull, reason: u);
@@ -58,7 +63,7 @@ void main() {
     test('普通网页链接**不**算文档链接（行为不变，仍走浏览器）', () {
       for (final u in [
         'https://example.com/',
-        'https://example.com/page.html',
+        'https://example.com/about',
         'https://www.deepseek.com/',
         'https://github.com/o/r/releases/tag/v1.0.0',
       ]) {

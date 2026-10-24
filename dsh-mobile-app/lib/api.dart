@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'logger.dart';
 import 'models.dart';
+import 'review/model.dart';
 
 class ApiException implements Exception {
   final String message;
@@ -54,6 +55,10 @@ class Api {
 
   /// 对话时间线能力由服务端显式声明，不能只按 package version 猜测。
   TimelineCapabilities timelineCapabilities = const TimelineCapabilities();
+
+  /// v3.2.14：宿主是否挂了 workspace-changes（bootstrap capabilities.changes）。
+  /// false 时 App 不显示改动卡片、不请求 /api/changes/*——旧宿主上这些请求只会 501。
+  bool changesSupported = false;
 
   /// 电脑的全部候选地址（局域网 IP / Tailscale IP / 127.0.0.1）。
   /// 连接失败时按顺序轮换（外出自动切 Tailscale，回家自动切回局域网）。
@@ -214,6 +219,8 @@ class Api {
             capabilities['eventTimeline'] is Map ? Map<String, dynamic>.from(capabilities['eventTimeline'] as Map) : null,
           )
         : const TimelineCapabilities();
+    // v3.2.14：改动审阅能力（旧插件没有这个字段 → false，卡片不出现）
+    changesSupported = capabilities is Map && capabilities['changes'] == true;
   }
 
   /// 连接成功后收集电脑全部地址（/api/bootstrap 的 server.urls 含 Tailscale/ZeroTier 等虚拟网段 IP）。
@@ -729,6 +736,39 @@ class Api {
       degraded: data['degraded'] == true,
       detailMode: data['detailMode'] as String?,
     );
+  }
+
+
+  // ── v3.2.14（改动审阅）：本轮改动的摘要与逐文件对比 ──
+  // 两个接口的 null 语义统一：null = 「这轮没有可提供的改动」，不是错误——
+  // 会话已释放、宿主重启过、文件工具没动过东西都会走到这里，调用方静默不显示入口即可。
+
+  /// 本轮改动摘要（Host 的 workspace-changes 按宣告事件 seq 保存）。
+  Future<TurnChanges?> changesSummary(String sessionId, int seq) async {
+    try {
+      final data = await getJson(
+        '/api/changes/summary?sessionId=${Uri.encodeQueryComponent(sessionId)}&seq=$seq',
+      );
+      return TurnChanges.tryParse(data['summary']);
+    } on ApiException catch (e) {
+      if (e.code == 'changes-not-found' || e.code == 'changes-unavailable') return null;
+      rethrow;
+    }
+  }
+
+  /// 某个改动文件在本轮开始/结束时的对比（二进制/过大会以 kind 表达，不是错误）。
+  Future<FileDiff?> changesDiff(String sessionId, int seq, int index) async {
+    try {
+      final data = await getJson(
+        '/api/changes/diff?sessionId=${Uri.encodeQueryComponent(sessionId)}&seq=$seq&index=$index',
+        // 大文件的两次快照读取 + 逐行对比：比普通一问一答慢，给足时间再判失败。
+        timeout: const Duration(seconds: 25),
+      );
+      return FileDiff.tryParse(data['diff']);
+    } on ApiException catch (e) {
+      if (e.code == 'changes-not-found' || e.code == 'changes-unavailable') return null;
+      rethrow;
+    }
   }
 
   Future<List<AppNotification>> notifications() async {

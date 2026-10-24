@@ -1,14 +1,21 @@
-// 统一文档加载器（v3.2.0）——字节 + 文件名 → docs/model.dart 的 Document。
+// 统一文档加载器（v3.2.0，v3.2.11 扩展数据结构家族）——字节 + 文件名 → docs/model.dart 的 Document。
 //
 // 一处收口的好处：无论是「从电脑工作区下载」「手机本地文件」「分享进来」还是
 // 「聊天里的产物」，最终都走同一个分派，格式能力不会各写一遍各漏一处。
+//
+// v3.2.11：新增 xml / json（树形阅读）、html（就地读网页）、svg（本机矢量渲染）；
+// 另外扩展名不认识时按内容嗅探，让拷来的配置片段 / 抓下来的页面也能直接打开。
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'docx.dart';
+import 'html.dart';
+import 'json.dart';
 import 'markdown.dart';
 import 'model.dart';
+import 'svg.dart';
 import 'xlsx.dart';
+import 'xml.dart';
 
 /// 可打开的最大字节数（防超大文件把手机内存吃满；纯粹是稳妥起见）。
 const int kMaxDocBytes = 24 * 1024 * 1024;
@@ -44,11 +51,22 @@ Document loadDocument(Uint8List bytes, String name) {
         return parseDocx(bytes, name);
       case DocFormat.xlsx:
         return parseXlsx(bytes, name);
+      case DocFormat.xml:
+        return parseXml(_decodeText(bytes), title);
+      case DocFormat.json:
+        return parseJson(_decodeText(bytes), title);
+      case DocFormat.html:
+        return parseHtml(_decodeText(bytes), title);
+      case DocFormat.svg:
+        return parseSvg(_decodeText(bytes), title);
       case DocFormat.unknown:
         return Document(
           title,
           DocFormat.unknown,
-          [DocRaw('暂不支持打开该格式（$name）。\n目前可读：md / txt / docx / xlsx。')],
+          [
+            DocRaw('暂不支持打开该格式（$name）。\n'
+                '目前可读：md / txt / csv / json / xml / html / svg / docx / xlsx。'),
+          ],
         );
     }
   } catch (e) {
@@ -75,13 +93,30 @@ String _decodeText(Uint8List bytes) {
   }
 }
 
-/// 内容嗅探：zip 魔数 → 看内部条目名区分 docx / xlsx；看似文本 → txt。
+/// 内容嗅探：zip 魔数 → docx / xlsx；开头像 XML / HTML / SVG / JSON 的直接认；
+/// 其余可打印文本 → txt。
 DocFormat _sniff(Uint8List bytes) {
   if (bytes.length >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B) {
     // 直接扫字节流找特征字符串（比解包便宜，且对损坏包也有效）
     final head = String.fromCharCodes(bytes.sublist(0, bytes.length < 4096 ? bytes.length : 4096));
     if (head.contains('word/')) return DocFormat.docx;
     if (head.contains('xl/')) return DocFormat.xlsx;
+  }
+  // 文本类格式特征（必须放在「可打印文本 → txt」之前，否则会一律落成 txt）
+  final lead = _headText(bytes)
+      .replaceFirst(RegExp(r'^\uFEFF'), '')
+      .trimLeft();
+  if (lead.isNotEmpty) {
+    final lower = lead.toLowerCase();
+    if (lower.startsWith('<?xml')) {
+      return lower.contains('<svg') ? DocFormat.svg : DocFormat.xml;
+    }
+    if (lower.startsWith('<svg')) return DocFormat.svg;
+    if (lower.startsWith('<!doctype html') || lower.startsWith('<html')) {
+      return DocFormat.html;
+    }
+    if (lead.startsWith('<')) return DocFormat.xml;
+    if (lead.startsWith('{') || lead.startsWith('[')) return DocFormat.json;
   }
   // 前 512 字节里没有 NUL 且可打印比例高 → 当文本
   final n = bytes.length < 512 ? bytes.length : 512;
@@ -93,6 +128,12 @@ DocFormat _sniff(Uint8List bytes) {
   }
   if (n > 0 && printable / n > 0.9) return DocFormat.text;
   return DocFormat.unknown;
+}
+
+/// 取开头 4KB 文本用于格式嗅探（容错解码，永不抛）。
+String _headText(Uint8List bytes) {
+  final n = bytes.length < 4096 ? bytes.length : 4096;
+  return utf8.decode(Uint8List.sublistView(bytes, 0, n), allowMalformed: true);
 }
 
 String _titleOf(String name) {
@@ -116,3 +157,5 @@ bool documentHasMath(Document doc) {
   }
   return false;
 }
+/// 该文档是否是树形结构（XML / JSON）——阅读页据此提供「展开/折叠全部」入口。
+bool documentHasTree(Document doc) => doc.blocks.any((b) => b is DocTree);

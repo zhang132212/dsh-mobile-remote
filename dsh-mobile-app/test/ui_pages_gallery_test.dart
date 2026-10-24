@@ -195,6 +195,37 @@ AppStore _fixtureStore() => AppStore()
 
 // ── 渲染 ──────────────────────────────────────────────────────────────────
 
+/// 定位 Flutter SDK 里的 MaterialIcons 字体文件（多机器可移植）。
+String _materialIconsFontPath() {
+  final sep = Platform.pathSeparator;
+  const tail = ['bin', 'cache', 'artifacts', 'material_fonts', 'materialicons-regular.otf'];
+
+  String? fromExecutable() {
+    try {
+      var dir = File(Platform.resolvedExecutable).parent; // dart-sdk/bin
+      for (var i = 0; i < 4; i++) {
+        dir = dir.parent;
+      }
+      return dir.path; // flutter root
+    } catch (_) {
+      return null;
+    }
+  }
+
+  final roots = <String>[
+    if ((Platform.environment['FLUTTER_ROOT'] ?? '').isNotEmpty)
+      Platform.environment['FLUTTER_ROOT']!,
+    if (fromExecutable() != null) fromExecutable()!,
+    r'F:\dsh-build-kit\flutter',
+    r'C:\dsh-build-kit\flutter',
+  ];
+  for (final root in roots) {
+    final candidate = <String>[root, ...tail].join(sep);
+    if (File(candidate).existsSync()) return candidate;
+  }
+  return <String>[roots.last, ...tail].join(sep);
+}
+
 /// 把字体文件注册到若干族名下（测试环境没有系统字体回退）。
 Future<void> _registerFont(String path, List<String> families) async {
   final bytes = File(path).readAsBytesSync();
@@ -283,19 +314,9 @@ void main() {
     ];
     await _registerFont(r'C:\Windows\Fonts\Deng.ttf', families);
     // 图标字体：测试环境默认不加载 MaterialIcons → 图标会画成空方块（版式走查必须能看见图标）。
-    // 路径不再硬编码开发者机器（原为 C:\dsh-build-kit\flutter\...），按 FLUTTER_ROOT 动态解析。
-    final flutterRoot = Platform.environment['FLUTTER_ROOT'] ??
-        File(Platform.resolvedExecutable)
-            .parent
-            .parent
-            .parent
-            .parent
-            .parent
-            .path;
-    await _registerFont(
-      '$flutterRoot/bin/cache/artifacts/material_fonts/materialicons-regular.otf',
-      const ['MaterialIcons'],
-    );
+    // 路径不能写死：不同机器的 build kit 位置不同（C:/F: 都见过），按 FLUTTER_ROOT +
+    // 当前 dart 解释器位置反推，最后才回退到历史路径。
+    await _registerFont(_materialIconsFontPath(), const ['MaterialIcons']);
 
     // 全局 api 是 final 顶层单例（懒初始化）：首次读取时确定 http.Client。
     // 在 runWithClient 的 zone 里做首次读取，之后就固定走 MockClient——

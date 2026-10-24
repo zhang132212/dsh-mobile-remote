@@ -1,24 +1,82 @@
 # Changelog
 
-## 未发布（ios/port 分支）— iOS 移植 + 部署验证修复
+## 未发布（ios 分支）— iOS 移植（基线 v3.2.15）
 
-> 版本：App `3.2.10+33`（新增 iOS 目标）/ 插件 `3.1.5-eun.1`。
+> 版本：App `3.2.15+38`（+ iOS 目标）/ 插件 `3.1.5-eun.1`。
+> 本分支 = main 的 v3.2.15 + iOS 平台层；业务逻辑与 Android 同源，只补平台差异。
 
 ### iOS 移植
 
-- 新增 `dsh-mobile-app/ios/` 完整 iOS 工程（**iOS 15.0+**，Swift Package Manager 无 Podfile，UIScene 生命周期）；原生桥实现 `dsh/files`（保存/文档选择/外部文档打开/24MB 上限/后台读/deliveryId 去重）与 `dsh/update`（iOS 恒不可用），不实现 `dsh/floating`。
-- Dart 侧平台适配：悬浮球/应用内更新在 iOS 显式降级；本地网络权限失败自动重试 + 设置路径引导；iOS 恢复 Cupertino 右滑返回；文件保存/分享/错误文案平台化。
-- 新增 GitHub Actions macOS CI（`.github/workflows/ios.yml`）：analyze / 全量测试 / 设备版 release 构建 / 模拟器冒烟 / `integration_test` / Android APK 回归 / 证据回传 `ci-artifacts` 分支；验收 tag `ios-port-v4`。
+- 新增 `dsh-mobile-app/ios/` 完整 iOS 工程（iOS 15.0+，SPM 无 Podfile，UIScene 生命周期）；Swift 原生桥实现 `dsh/files`（保存 / 文档选择 / 外部文档打开 / 24MB 上限 / 后台读 / deliveryId 去重）与 `dsh/update`（iOS 恒不可用），不实现 `dsh/floating`。
+- Dart 侧平台适配：悬浮球与应用内更新在 iOS 显式降级；本地网络权限失败自动重试并给出设置路径；iOS 恢复 Cupertino 右滑返回；文件保存 / 分享 / 错误文案平台化。
+- 新增 macOS CI（`.github/workflows/ios.yml`）：analyze / 全量测试 / 设备版 release 构建 / 模拟器冒烟 / `integration_test` / Android APK 回归 / 证据回传 `ci-artifacts` 分支。
 
 ### 修复
 
-- **桌面设置页「连接移动端设备」二维码数据 500**（v3.2.5 起）：`publicEntrances` 定义在 `/bootstrap` 分支内部，`/qr-config` 引用时抛 `ReferenceError`。已提升到 `handleApi` 作用域，两端点共用；实测 `qr-config` 恢复 200。
-- 部署验证（DSH 0.2.1-rc.2）：按 README 部署章节实测 bootstrap 鉴权、LAN 桥转发、qr-config、qr.png、Host 白名单、SSE hello 全部通过；DSH 0.2.x 需 `dsh plugin allow-version` 豁免（插件 peer 范围 0.1.x），已写入 README 部署章节。
+- **桌面设置页「连接移动端设备」二维码数据 500**（v3.2.5 起）：`publicEntrances` 定义在 `/bootstrap` 分支内部，`/qr-config` 引用时抛 `ReferenceError`；已提升到 `handleApi` 作用域，两端点共用。
+- 部署验证（DSH 0.2.1-rc.2）：bootstrap 鉴权 / LAN 桥转发 / qr-config / qr.png / Host 白名单 / SSE hello 全部通过；DSH 0.2.x 需 `dsh plugin allow-version` 豁免（插件 peer 范围 0.1.x）。
 
 ### 文档
 
-- README 重写：新增「部署」完整章节（前置/版本对齐、安装、配置、LAN 桥、启动验证、手机端、更新回滚、排障、实测记录）；App README 同步补全功能与构建说明；docs/06 §9 iOS 验收项勾选。
+- README 与 App README 补 iOS 构建、平台差异、验收范围；docs/06 §9 iOS 验收项勾选；docs/ios-ci.md 记录 CI 细节。
 
+## v3.2.15（2026-10-20）— 思维链逐步出现 + 失败原因不再被吞
+
+> 版本：App `3.2.15+38` / 插件 `3.1.5-eun.1`。
+> 验收门槛：`flutter analyze`（0 issue）。`flutter test`（全绿，见 CHANGELOG 下方各版本测试数）。
+
+- **思维链不再只在轮次结束才出现一波**：0.2.x 的多步工具调用里，中间步骤的 assistant 消息常常「只有思维链 + 工具调用、正文为空」；旧逻辑把这类消息整条丢弃，连思维链一起丢 → 手机端只会在最后一条有正文的消息上看到一波。现在「正文为空但思维链非空」的步骤也会作为可折叠思维链块出现在时间线上，**每一步思考完成就出现一波**（折叠展开策略仍跟随设置）。
+- **轮次失败原因直接落进对话**：以前模型报错时时间线只剩一句「轮次 N 结束（error）」，真正原因（例如「402: Insufficient account funds」）只躺在通知中心里，用户看到的就是「对话不了」。现在失败轮次会插入醒目的错误卡片，原样展示内核给的失败原因。
+- 只有思维链、没有正文的步骤块不再显示复制/评价操作栏（没有正文可操作）；正文为空时不再渲染「…」占位。
+- 回归：新增 `test/reasoning_step_visibility_test.dart`（2 例：分步思维链可见、失败原因卡片可见）。
+## v3.2.14（2026-10-20）— 代码改动审阅：AI 跑完之后，逐文件看它改了哪几行
+
+> 版本：App `3.2.14+37` / 插件 `3.1.5-eun.1`（插件新增两个只读端点 + 一个能力位，均为增量）。
+> 验收门槛：`flutter analyze`（0 issue）。`flutter test`（348 全部通过）。
+
+- **对话末尾的「本轮改动」卡片**（对齐 PC 端改动文件卡片）：agent 写完代码、轮次结束时，消息流末尾出现一张汇总卡——`N 个文件` + 本轮增删行数；单文件时直接写「已编辑 <文件名>」。列表按电脑端的显示顺序排，默认 4 行、可展开全部；二进制与超大文件显示状态词而不是假的行数。**没有摘要就不出现**，不铺空壳卡片。
+- **变更审阅页**（`lib/review/`）：点卡片进全屏——顶部摘要（轮次 / 文件数 / 增删合计）、横向文件选择器（每个文件各带 `+N −M`）、正文是单文件 unified diff：**两侧行号 + `+/-` 标记 + 增删整行底色**，hunk 头 `@@ -a,b +c,d @@`，与 PC 端同一份 hunk 数据；带「上一个 / 下一个」快速翻文件。
+- **「新增的文件」一眼可见**：文件头按对比给出「本轮新建文件 / 本轮删除文件 / 本轮内容没有变化 / 逐行对比超时（整文件替换）/ 二进制 / 超过 2 MB」——这些状态来自电脑端对两侧快照的判断，不是客户端猜的。
+- **文档阅读器重构：多了一个「改动」页签**。从审阅页点「打开文件」，阅读器顶部出现「文档 / 改动」切换——同一页里既能读全文，也能看这一轮到底改了哪几行；阅读器不再只是「把文件摊开给你读」。
+- **数据同源、手机不重算**：改动来自 Host 的 `@deepseek-ai/dsh-workspace-changes`（git 工作树快照 + 文件工具编辑前后的整文件捕获），手机只经 `/m/api/changes.summary`、`/m/api/changes.diff` 按需取回；App 按 bootstrap 的 `capabilities.changes` 判断宿主是否具备该能力——旧宿主上卡片不出现、请求也不发。
+- **规模兜底**：单文件先渲 400 行、「显示更多」按 400 行递增，硬上限 5000 行（与 PC 端 review tab 同值）；对比正文可长按选择，头部按钮可复制整份 diff。
+- **事件链路**：`workspace/changes` 不再落到「未知事件」的通用行——服务端摘要透传轮号（`data.turn`），App 同轮只保留最新一次宣告（Host 语义：后一次记录取代前一次），历史回放与实时共用一条构建路径。
+- 回归：新增 `test/review_model_test.dart`（8 例：解析容错、行号编号、状态说明、路径还原）、`test/review_widget_test.dart`（7 例：卡片/展开/空态、diff 标记与分批展开、审阅页切文件与二进制）、`test/changes-event.test.mjs`（事件摘要透传轮号；无完整 dsh profile 的机器上显式 skip 而不是假通过）。
+## v3.2.13（2026-10-20）— HTML「交互模式」：页面里 JS 设计的按钮真的能点
+
+> 版本：App `3.2.13+36` / 插件 `3.1.5-eun.1`。
+> 验收门槛：`flutter analyze`（0 issue）。`flutter test` 全绿。
+
+- 阅读页（HTML）工具栏新增「交互模式（可点按钮）」按钮：把页面交给 **Android 系统 WebView**（原生 Activity 承载，不引第三方 WebView 包、不跳外部浏览器），真浏览器引擎执行 —— 按钮 / 脚本 / 表单 / JS 弹窗全部可用。
+- **电脑工作区里的本地 HTML**：正文 + 所在目录一起交给原生侧；页面里相对路径的 JS / CSS / 图片由 `shouldInterceptRequest` 经电脑端 `/m/api/files` 拉取（路径限定在文档目录内，阻止 `../` 越界）—— 依赖脚本的按钮也能正常工作。
+- **http(s) 网页**：直接交给 WebView 加载，完整网页能力（登录、表单、动态交互照常）。
+- **安全边界**：不开 `addJavascriptInterface`、不开 `file://` 访问、Activity `exported=false` 不暴露外部入口；`alert/confirm/prompt` 由宿主对话框接管。
+- 静态阅读模式完全保留（默认仍是排版阅读，交互模式按需点一下进入）；HTML 阅读页顶部新增「交互模式」入口条，不用再猜按钮藏在哪。「查看源码 / 复制 / 另存」等能力不受影响。
+- 回归：新增 `test/html_interactive_test.dart`（参数构造 3 例）。
+## v3.2.12（2026-10-20）— HTML 文档里的链接真的能点了
+
+> 版本：App `3.2.12+35` / 插件 `3.1.5-eun.1`。
+> 验收门槛：`flutter analyze`（0 issue）。`flutter test`（330 全部通过）。
+
+- **正文内链接的「基准」补上了**：以前点 HTML / Markdown 里的相对链接（`href="other.html"`、`./sub/page.md`、`../up.html`、`/abs.html`）只会弹「非网页链接」；现在按文档所在位置解析：
+  - 电脑工作区里的本地文档 → 解析成同目录 / 子目录 / 盘符根下的绝对路径，**在阅读抽屉里就地打开**目标文档（HTML→HTML、HTML→md/json/xml 可以连续读）；
+  - http(s) 网络文档 → 按文档 URL 解析成绝对地址，再决定「就地读」还是「交浏览器」；
+  - `file:///C:/…`、Windows 绝对路径（`C:\…` / `C:/…`）同样可以直接打开。
+- **页内锚点（#hash）可点**：HTML 的 `id`（兼容老式 `<a name>`）现在会带进文档模型，点 `<a href="#install">` 会滚动到对应标题/段落；找不到锚点会明确提示，不静默。
+- **外链回退更合理**：`http(s)` 外链仍交浏览器；`mailto:` / `tel:` 交给系统应用（此前统一弹「非网页链接」）；危险 scheme（`javascript:` 等）保持不拉起。
+- **可点性更明显**：正文链接加细下划线 + 完整点击热区，一眼能看出哪里能点。
+- 回归：新增 `test/docs_html_links_test.dart` 8 例（本地/网络相对链接、根相对、Windows 绝对路径、file URI、页内锚点、点击链路）；`DocHeading` / `DocPara` 新增 `anchor` 字段。
+## v3.2.11（2026-10-20）— 文档阅读器升级：HTML / SVG / XML / JSON 就地读取
+
+> 版本：App `3.2.11+34` / 插件 `3.1.5-eun.1`。
+> 验收门槛：`flutter analyze`（0 issue）。`flutter test`（322 全部通过）。
+
+- **HTML**：容错解析（未闭合标签、大小写混写、void 元素、裸 `&` 都能吃下），映射到标题 / 段落 / 列表 / 表格 / 引用 / 代码 / 链接 / 图片 / 行内样式，复用同一套阅读渲染与目录跳转；`script` / `style` / `head` / `meta` 一律不产出内容——宁可少显示，也不把 JS/CSS 糊进正文。顺带修复「body 下直接出现的行内标签」丢语义的问题（顶层 `<a>` / `<img>` 现在也能正确出链接与图片）。
+- **SVG**：纯 Dart 解析常用子集（rect / circle / ellipse / line / polyline / polygon / path 全命令、嵌套 `g` 与 transform、fill/stroke/opacity/linecap/linejoin、text、颜色），由 CustomPainter 就地矢量渲染（不引 flutter_svg、不开 WebView）；白底卡片保证深色主题下看得见，卡片底部可展开「查看 SVG 源码」。
+- **XML**：解析成可折叠树——声明 / 注释 / DOCTYPE / 处理指令按伪节点保留，属性、文本、CDATA 不丢；覆盖 xsd / xsl / plist / rss / atom / kml / csproj / props / resx / pom / xaml 等同族扩展名；节点上限 4000，超限截断并给出页内告警。
+- **JSON**：解析成可折叠树并按类型标注（object / array / string / number / boolean / null），一眼分清键和值；支持 JSONC（`//`、`/* */` 注释与尾逗号）及 geojson / webmanifest；字符串里的 `//`、`,` 不会被剥离逻辑误伤；解析失败按源码兜底，不抛异常。
+- **通用体验**：树形视图默认展开两层，阅读页「更多」提供「全部展开 / 全部折叠」；「目录」只在有标题结构时出现；「导出 Word」对数据结构 / 矢量图隐藏（仍可复制全文 / 另存原文件）；文件没有扩展名时按内容嗅探（拷来的配置片段、抓下来的页面也能直接打开）；外部「用 DSH Remote 打开」/ 分享入口的 MIME 与扩展名清单同步扩到新格式。
+- 回归：新增 `test/docs_xml_test.dart`、`docs_html_test.dart`、`docs_json_test.dart`、`docs_svg_test.dart`、`docs_loader_formats_test.dart`、`docs_reader_widget_test.dart`（23 例）；`docs_link_test` 更新「html 直链现在就地打开」的新语义；`ui_pages_gallery_test` 的图标字体路径改为按 FLUTTER_ROOT / 解释器位置推导（不再写死 C: 盘）。
 ## v3.2.10（2026-10-19）— 修复问询/审批对话框超出屏幕
 
 > 版本：App `3.2.10+33` / 插件 `3.1.5-eun.1`。
