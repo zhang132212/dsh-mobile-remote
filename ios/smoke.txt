@@ -1,0 +1,17 @@
+udid=48B2DA2E-AF18-4E36-BB25-B25969A4EBCF
+simulator=iOS-26-2 / iPhone SE (3rd generation)
+bundle_id=com.dsh.remote
+pid=37765
+launch_call_ms=262867
+first_frame_elapsed_ms=278766
+app_container=/Users/runner/Library/Developer/CoreSimulator/Devices/48B2DA2E-AF18-4E36-BB25-B25969A4EBCF/data/Containers/Bundle/Application/1533B9DE-8C7D-46E9-A409-149EF63A384D/Runner.app
+sim_app_bytes=191692800
+sim_app_human=183M
+runner_binary_bytes=123136
+impeller_log=1
+impeller_snippet=2026-10-24 16:18:00.355 Df Runner[37765:1ace9] (Flutter) [IMPORTANT:flutter/shell/platform/darwin/graphics/FlutterDarwinContextMetalImpeller.mm(45)] Using the Impeller rendering backend (Metal).
+wait_seconds=12
+screenshot=smoke.png
+screenshot_bytes=63281
+alive=yes
+keep_booted=yes

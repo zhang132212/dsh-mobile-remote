@@ -1,0 +1,6 @@
+device_app_bytes=24670208
+device_app_human= 24M
+sim_app_bytes=163393536
+sim_app_human=156M
+device_zip_bytes=12451840
+device_zip_human= 12M

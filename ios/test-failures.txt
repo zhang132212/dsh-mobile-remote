@@ -1,0 +1,2 @@
+00:00 +0 -1: loading /Users/runner/work/dsh-mobile-remote/dsh-mobile-remote/dsh-mobile-app/integration_test/app_smoke_test.dart [E]
+00:00 +0 -1: Some tests failed.

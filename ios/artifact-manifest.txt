@@ -1,0 +1,69 @@
+# iOS CI 构建产物清单
+
+- 生成时间: 2026-10-24T16:22:28Z
+- 仓库: zhang132212/dsh-mobile-remote
+- ref: ci/ipa  commit: 5e25e2128b0caa06c450322f17a137e13389e2c5
+- run: 40109432810 attempt 1
+
+
+## 设备版 Runner.app（flutter build ios --release --no-codesign）
+- path: dsh-mobile-app/build/ios/iphoneos/Runner.app
+- 大小:  24M
+- 文件数: 84
+- bundle id: com.dsh.remote
+- version: 3.2.10 (build 33)
+- sha256(Runner): 5af17a73b9bb05cc3f64d28e6c7ec3782961aee3ac9fdd1af97e2b8817e6b566
+- Runner 架构: Mach-O 64-bit executable arm64
+- Frameworks:
+    - App.framework
+    - Flutter.framework
+    - objective_c.framework
+- 顶层内容:
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/AppFrameworkInfo.plist
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/AppIcon60x60@2x.png
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/AppIcon76x76@2x~ipad.png
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/Assets.car
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/Base.lproj
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/Frameworks
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/image_picker_ios_image_picker_ios.bundle
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/Info.plist
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/mobile_scanner_mobile_scanner.bundle
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/package_info_plus_package_info_plus.bundle
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/PkgInfo
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/Runner
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/shared_preferences_foundation_shared_preferences_foundation.bundle
+    - dsh-mobile-app/build/ios/iphoneos/Runner.app/url_launcher_ios_url_launcher_ios.bundle
+
+## 模拟器版 Runner.app（flutter build ios --simulator --debug）
+- path: dsh-mobile-app/build/ios/iphonesimulator/Runner.app
+- 大小: 156M
+- 文件数: 115
+- bundle id: com.dsh.remote
+- version: 3.2.10 (build 33)
+- sha256(Runner): f2b263d9d2c2b4d68d290d144c211683023b87266d9f9723ff865b2470738ef1
+- Runner 架构: Mach-O 64-bit executable arm64
+- Frameworks:
+    - App.framework
+    - Flutter.framework
+    - objective_c.framework
+- 顶层内容:
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/__preview.dylib
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/_CodeSignature
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/AppFrameworkInfo.plist
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/AppIcon60x60@2x.png
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/AppIcon76x76@2x~ipad.png
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/Assets.car
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/Base.lproj
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/Frameworks
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/image_picker_ios_image_picker_ios.bundle
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/Info.plist
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/mobile_scanner_mobile_scanner.bundle
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/package_info_plus_package_info_plus.bundle
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/PkgInfo
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/Runner
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/Runner.debug.dylib
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/shared_preferences_foundation_shared_preferences_foundation.bundle
+    - dsh-mobile-app/build/ios/iphonesimulator/Runner.app/url_launcher_ios_url_launcher_ios.bundle
+
+## 归档
+- Runner-device-release.app.zip（设备版 .app 压缩包）

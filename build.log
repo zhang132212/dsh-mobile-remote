@@ -1,0 +1,22 @@
+
+===== STEP assemble-report  2026-10-24T16:23:59Z =====
+ios 证据根: /home/runner/work/dsh-mobile-remote/dsh-mobile-remote/staging/ios
+android 证据根: /home/runner/work/dsh-mobile-remote/dsh-mobile-remote/staging/android
+run.json 已生成: 31 个文件, status= success
+汇总完成：iOS=success(job=success) Android=success(job=success) 总体=success
+ci-out-report 内容:
+total 44
+drwxr-xr-x  4 runner runner 4096 Oct 24 16:23 .
+drwxr-xr-x 12 runner runner 4096 Oct 24 16:23 ..
+-rw-r--r--  1 runner runner  904 Oct 24 16:23 README.md
+-rw-r--r--  1 runner runner   21 Oct 24 16:23 allowed-steps.txt
+drwxr-xr-x  2 runner runner 4096 Oct 24 16:23 android
+-rw-r--r--  1 runner runner  382 Oct 24 16:23 build.log
+-rw-r--r--  1 runner runner    0 Oct 24 16:23 failed-steps.txt
+drwxr-xr-x  2 runner runner 4096 Oct 24 16:23 ios
+-rw-r--r--  1 runner runner 4650 Oct 24 16:23 run.json
+-rw-r--r--  1 runner runner    8 Oct 24 16:23 status.txt
+-rw-r--r--  1 runner runner 2930 Oct 24 16:23 summary.md
+
+===== STEP publish-artifacts (branch=ci-artifacts status=success)  2026-10-24T16:23:59Z =====
+扫描到 32 个文件，开始筛选/复制（work=/home/runner/work/_temp/ci-artifacts-publish，skip_globs=[]，max=62914560B）

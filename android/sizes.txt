@@ -1,0 +1,3 @@
+apk_outcome=success
+apk_bytes=80378542
+apk_human=77M
