@@ -59,13 +59,17 @@ Document loadDocument(Uint8List bytes, String name) {
         return parseHtml(_decodeText(bytes), title);
       case DocFormat.svg:
         return parseSvg(_decodeText(bytes), title);
+      case DocFormat.pdf:
+        // PDF 不做块级解析：阅读页拿到原始字节后交给原生按页渲染（docs/pdf_view.dart）。
+        // 这里返回空 blocks 只是为了让「格式判定 → 阅读页分派」保持单一路径。
+        return Document(title, DocFormat.pdf, const []);
       case DocFormat.unknown:
         return Document(
           title,
           DocFormat.unknown,
           [
             DocRaw('暂不支持打开该格式（$name）。\n'
-                '目前可读：md / txt / csv / json / xml / html / svg / docx / xlsx。'),
+                '目前可读：md / txt / csv / json / xml / html / svg / docx / xlsx / pdf。'),
           ],
         );
     }
@@ -93,9 +97,18 @@ String _decodeText(Uint8List bytes) {
   }
 }
 
-/// 内容嗅探：zip 魔数 → docx / xlsx；开头像 XML / HTML / SVG / JSON 的直接认；
+/// 内容嗅探：zip 魔数 → docx / xlsx；PDF 魔数 → pdf；开头像 XML / HTML / SVG / JSON 的直接认；
 /// 其余可打印文本 → txt。
 DocFormat _sniff(Uint8List bytes) {
+  // v3.2.16：%PDF- 魔数（有些分享渠道会把文件名改成 download.bin，扩展名靠不住）
+  if (bytes.length >= 5 &&
+      bytes[0] == 0x25 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x44 &&
+      bytes[3] == 0x46 &&
+      bytes[4] == 0x2D) {
+    return DocFormat.pdf;
+  }
   if (bytes.length >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B) {
     // 直接扫字节流找特征字符串（比解包便宜，且对损坏包也有效）
     final head = String.fromCharCodes(bytes.sublist(0, bytes.length < 4096 ? bytes.length : 4096));

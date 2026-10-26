@@ -317,7 +317,10 @@ class Spreadsheet {
 ///   · json —— 树形阅读（对象/数组/标量按类型标注，JSONC 容错）
 ///   · html —— 就地按文档阅读，不再跳浏览器
 ///   · svg  —— 本机矢量渲染（纯 Dart 解析 + CustomPainter，不引第三方 SVG 库）
-enum DocFormat { markdown, text, docx, xlsx, xml, json, html, svg, unknown }
+///
+/// v3.2.16 新增 [pdf]：它不进 [Document.blocks]（PDF 是排版好的页面流），
+/// 阅读页按格式切到 PdfView，由原生 PdfRenderer / PDFKit 逐页出图。
+enum DocFormat { markdown, text, docx, xlsx, xml, json, html, svg, pdf, unknown }
 
 /// 从文件名/路径推断格式。
 DocFormat detectFormat(String nameOrPath) {
@@ -374,7 +377,11 @@ DocFormat detectFormat(String nameOrPath) {
       return DocFormat.html;
     // v3.2.8：矢量图——本机渲染
     case 'svg':
+    case 'svgz':
       return DocFormat.svg;
+    // v3.2.16：PDF——原生按页渲染
+    case 'pdf':
+      return DocFormat.pdf;
     default:
       return DocFormat.unknown;
   }
@@ -407,6 +414,8 @@ const List<String> kReadableExtensions = [
   'csproj', 'props', 'resx', 'pom', 'xaml',
   'html', 'htm', 'xhtml', 'shtml',
   'svg',
+  // v3.2.16：PDF（原生按页渲染）
+  'pdf',
 ];
 
 // ══════════════════════════════════════════════════════════════════

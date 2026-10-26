@@ -22,6 +22,7 @@ import '../docs/docx_writer.dart';
 import '../docs/html_interactive.dart';
 import '../docs/loader.dart';
 import '../docs/model.dart';
+import '../docs/pdf_view.dart';
 import '../docs/render.dart';
 import '../review/diff_view.dart';
 import '../review/model.dart' as review;
@@ -465,7 +466,12 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
           doc.format != DocFormat.json);
 
   /// 全屏页与抽屉共用的操作按钮。
-  List<Widget> _actions(Document? doc) => [
+  ///
+  /// PDF 只保留「另存原文件」：字号缩放、目录、树形展开、导出 Word、复制全文
+  /// 都是块级文档的能力，对按页渲染的 PDF 没有意义，摆在那儿只会点了没反应。
+  List<Widget> _actions(Document? doc) {
+    final isPdf = doc?.format == DocFormat.pdf;
+    return [
         // HTML：一键进入「交互模式」——跑真 WebView，页面里的按钮/脚本可用
         if (doc != null && doc.format == DocFormat.html)
           Center(
@@ -475,7 +481,7 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
               onTap: _openInteractive,
             ),
           ),
-        if (_hasOutlineEntry(doc))
+        if (!isPdf && _hasOutlineEntry(doc))
           Center(
             child: DshIconButton(
               icon: Icons.list_alt_outlined,
@@ -508,39 +514,42 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
               }
             },
             itemBuilder: (c) => [
-              PopupMenuItem(
-                value: 'font+',
-                child: Text(L10n.t('放大字号（${(_scale * 100).round()}%）', 'Larger text (${(_scale * 100).round()}%)')),
-              ),
-              PopupMenuItem(
-                value: 'font-',
-                child: Text(L10n.t('缩小字号（${(_scale * 100).round()}%）', 'Smaller text (${(_scale * 100).round()}%)')),
-              ),
-              PopupMenuItem(value: 'font0', child: Text(L10n.t('恢复默认字号', 'Reset text size'))),
-              const PopupMenuDivider(),
-              if (doc != null && documentHasTree(doc)) ...[
+              if (!isPdf) ...[
                 PopupMenuItem(
-                  value: 'tree-expand',
-                  child: Text(L10n.t('全部展开', 'Expand all')),
+                  value: 'font+',
+                  child: Text(L10n.t('放大字号（${(_scale * 100).round()}%）', 'Larger text (${(_scale * 100).round()}%)')),
                 ),
                 PopupMenuItem(
-                  value: 'tree-collapse',
-                  child: Text(L10n.t('全部折叠', 'Collapse all')),
+                  value: 'font-',
+                  child: Text(L10n.t('缩小字号（${(_scale * 100).round()}%）', 'Smaller text (${(_scale * 100).round()}%)')),
                 ),
+                PopupMenuItem(value: 'font0', child: Text(L10n.t('恢复默认字号', 'Reset text size'))),
                 const PopupMenuDivider(),
+                if (doc != null && documentHasTree(doc)) ...[
+                  PopupMenuItem(
+                    value: 'tree-expand',
+                    child: Text(L10n.t('全部展开', 'Expand all')),
+                  ),
+                  PopupMenuItem(
+                    value: 'tree-collapse',
+                    child: Text(L10n.t('全部折叠', 'Collapse all')),
+                  ),
+                  const PopupMenuDivider(),
+                ],
+                if (_canExportWord(doc))
+                  PopupMenuItem(
+                    value: 'word',
+                    child: Text(L10n.t('导出 Word（公式原生）', 'Export Word (native equations)')),
+                  ),
               ],
-              if (_canExportWord(doc))
-                PopupMenuItem(
-                  value: 'word',
-                  child: Text(L10n.t('导出 Word（公式原生）', 'Export Word (native equations)')),
-                ),
               PopupMenuItem(value: 'save', child: Text(L10n.t('另存原文件', 'Save original file'))),
-              if (doc != null && doc.format != DocFormat.xlsx)
+              if (doc != null && doc.format != DocFormat.xlsx && !isPdf)
                 PopupMenuItem(value: 'copy', child: Text(L10n.t('复制全文', 'Copy full text'))),
             ],
           ),
         ),
       ];
+  }
 
   /// v3.2.14：（从改动审阅页打开时）顶部的「文档 / 改动」切换条。
   ///
@@ -714,6 +723,14 @@ class _DocViewerScreenState extends State<DocViewerScreen> {
 
     final doc = _doc;
     if (doc == null) return const SizedBox.shrink();
+
+    // v3.2.16：PDF 不走块级渲染器——交给原生按页渲染（PdfRenderer / PDFKit）。
+    // 原始字节在 _load 时已经拿齐，这里直接用，避免再拉一次。
+    if (doc.format == DocFormat.pdf) {
+      final raw = _raw;
+      if (raw == null) return const SizedBox.shrink();
+      return PdfView(bytes: raw, name: widget.name);
+    }
 
     // v3.2.4：把「去哪儿取图」交给渲染器 ——
     // 本地文档用所在目录解析 `![](图/x.png)`，网络文档用其基址解析相对 URL。

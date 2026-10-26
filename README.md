@@ -93,6 +93,7 @@ agent 写完代码，对话末尾出现「本轮改动」卡片：改了 N 个�
 - **SVG**：纯 Dart 矢量渲染（含 path 全命令、transform、text），不引第三方库；可展开看源码
 - **XML / JSON**：折叠树 + 类型标注，JSONC 容错；超大文档截断并告警
 - **Word / Excel**：docx、xlsx 就地读；也能把 Markdown 导出成 docx
+- **PDF**：按页渲染（Android 用系统 `PdfRenderer`），一页一屏、双指放大、点页码跳页；不引第三方 PDF 库
 - 相对链接、页内锚点、`file:///` 与 Windows 绝对路径都可点，在阅读抽屉里就地打开
 
 ### 2.7 用量与额度

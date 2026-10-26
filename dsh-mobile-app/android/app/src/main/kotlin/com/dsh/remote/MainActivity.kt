@@ -1,18 +1,43 @@
 package com.dsh.remote
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     private var floatingChannel: MethodChannel? = null
     private var filesChannel: MethodChannel? = null
+
+    // ── v3.2.16：PDF 阅读（用系统自带 PdfRenderer，不引第三方包）──────────────
+    // PDF 是排版好的页面流，按页渲染成位图才是正解；Dart 侧只管「要第几页、多宽」。
+    // PdfRenderer 不是线程安全的，所以所有调用都丢进单线程队列串行执行。
+    //
+    // 为什么按会话（id）而不是全局单例：阅读页可能同时活着两份——聊天抽屉里一份、
+    // 从链接再开的全屏页一份；单例会让「后开的文档把先开的 renderer 关掉」，
+    // 返回前一份时翻到没缓存的页就报「PDF 尚未打开」。
+    private val pdfExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private data class PdfSession(
+        val renderer: PdfRenderer,
+        val fd: ParcelFileDescriptor,
+        val file: File,
+    )
+    private val pdfSessions = LinkedHashMap<Int, PdfSession>()
+    private var pdfNextId = 1
+    private val maxPdfSessions = 6
     // v3.1.2（csborbbnc 反馈）：系统文件选择器（ACTION_OPEN_DOCUMENT）结果回传暂存
     private var pendingPick: MethodChannel.Result? = null
     private val pickFileRequestCode = 2001
@@ -107,6 +132,32 @@ class MainActivity : FlutterActivity() {
                         } catch (e: Exception) {
                             result.error("open-html-failed", e.message, null)
                         }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        // v3.2.16：PDF 阅读——按页渲染（PdfRenderer 只在本机跑，不联网）
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dsh/pdf")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "open" -> {
+                        val bytes = call.argument<ByteArray>("bytes")
+                        if (bytes == null || bytes.isEmpty()) {
+                            result.error("bad-args", "missing bytes", null)
+                            return@setMethodCallHandler
+                        }
+                        openPdf(bytes, result)
+                    }
+                    "render" -> {
+                        val id = call.argument<Int>("id") ?: -1
+                        val index = call.argument<Int>("index") ?: 0
+                        val width = call.argument<Int>("width") ?: 1200
+                        val quality = call.argument<Int>("quality") ?: 88
+                        renderPdf(id, index, width, quality, result)
+                    }
+                    "close" -> {
+                        val id = call.argument<Int>("id") ?: -1
+                        closePdf(id, result)
                     }
                     else -> result.notImplemented()
                 }
@@ -292,6 +343,141 @@ class MainActivity : FlutterActivity() {
             // 安装器不存在 / FileProvider 配置错 / 权限被拒——一律当作「没发起」，绝不崩
             false
         }
+    }
+
+    // ── v3.2.16：PDF 阅读（按页渲染）──────────────────────────────────────
+    /**
+     * 打开一份 PDF：字节落到缓存文件（PdfRenderer 只吃可 seek 的 fd），
+     * 返回 {id, pages, width, height}——id 是本次阅读会话，后续 render/close 都要带上。
+     *
+     * 为什么先落盘：PdfRenderer 需要真实文件描述符；落到 App 私有 cache 目录不占用户空间，
+     * 卸载时会一并清掉，也不需要任何存储权限。
+     */
+    private fun openPdf(bytes: ByteArray, result: MethodChannel.Result) {
+        pdfExecutor.execute {
+            try {
+                val id = pdfNextId++
+                val f = File(cacheDir, "pdf-$id.pdf")
+                f.writeBytes(bytes)
+                val fd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+                val renderer = try {
+                    PdfRenderer(fd)
+                } catch (e: Exception) {
+                    // 打不开就立刻还资源：加密 / 损坏 / 非 PDF 都会走这里
+                    try {
+                        fd.close()
+                    } catch (_: Exception) {
+                    }
+                    f.delete()
+                    throw e
+                }
+                val page = renderer.openPage(0)
+                val w = page.width
+                val h = page.height
+                page.close()
+                pdfSessions[id] = PdfSession(renderer, fd, f)
+                // 极端情况下（同时开很多份）淘汰最早的，避免句柄泄漏
+                while (pdfSessions.size > maxPdfSessions) {
+                    closeSession(pdfSessions.keys.first())
+                }
+                mainHandler.post {
+                    result.success(
+                        mapOf(
+                            "id" to id,
+                            "pages" to renderer.pageCount,
+                            "width" to w,
+                            "height" to h,
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    result.error("pdf-open-failed", e.message ?: e.javaClass.simpleName, null)
+                }
+            }
+        }
+    }
+
+    /**
+     * 渲染第 [index] 页为 JPEG：宽度由 Flutter 按屏幕像素给，高度按页面比例算，
+     * 上限 2400px（再大只是吃内存，手机屏幕上看不出差别）。
+     */
+    private fun renderPdf(id: Int, index: Int, width: Int, quality: Int, result: MethodChannel.Result) {
+        pdfExecutor.execute {
+            var page: PdfRenderer.Page? = null
+            var bmp: Bitmap? = null
+            try {
+                val session = pdfSessions[id] ?: throw IllegalStateException("PDF 会话不存在或已关闭")
+                val renderer = session.renderer
+                if (index < 0 || index >= renderer.pageCount) {
+                    throw IllegalArgumentException("页码越界：$index")
+                }
+                page = renderer.openPage(index)
+                val w = width.coerceIn(240, 2400)
+                val h = (w.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
+                bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                // PdfRenderer 不保证底色，先铺白：深色主题下 PDF 也该是白纸
+                bmp.eraseColor(android.graphics.Color.WHITE)
+                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                val out = ByteArrayOutputStream()
+                bmp.compress(Bitmap.CompressFormat.JPEG, quality.coerceIn(50, 100), out)
+                val data = out.toByteArray()
+                mainHandler.post { result.success(data) }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    result.error("pdf-render-failed", e.message ?: e.javaClass.simpleName, null)
+                }
+            } finally {
+                try {
+                    page?.close()
+                } catch (_: Exception) {
+                }
+                try {
+                    bmp?.recycle()
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    /** 关闭某一个阅读会话（换文档 / 退出阅读页）。 */
+    private fun closePdf(id: Int, result: MethodChannel.Result) {
+        pdfExecutor.execute {
+            closeSession(id)
+            mainHandler.post { result.success(true) }
+        }
+    }
+
+    /** 仅可在 pdfExecutor 线程调用。 */
+    private fun closeSession(id: Int) {
+        val session = pdfSessions.remove(id) ?: return
+        try {
+            session.renderer.close()
+        } catch (_: Exception) {
+        }
+        try {
+            session.fd.close()
+        } catch (_: Exception) {
+        }
+        try {
+            session.file.delete()
+        } catch (_: Exception) {
+        }
+    }
+
+    /** 仅可在 pdfExecutor 线程调用。 */
+    private fun closeAllPdfSessions() {
+        for (id in pdfSessions.keys.toList()) closeSession(id)
+    }
+
+    override fun onDestroy() {
+        // 关会话也排进同一队列：避免和正在跑的 render 抢 PdfRenderer
+        try {
+            pdfExecutor.execute { closeAllPdfSessions() }
+            pdfExecutor.shutdown()
+        } catch (_: Exception) {
+        }
+        super.onDestroy()
     }
 
     private fun startBubbleService() {
