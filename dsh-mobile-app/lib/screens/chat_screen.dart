@@ -52,6 +52,17 @@ bool isDefinitiveSendRejection(String? code) => switch (code) {
 String draftAfterFailure(String current, String fallback) =>
     current.trim().isEmpty ? fallback : current;
 
+/// v3.3.1（手写适配）：输入法「预上屏」是否正在进行。
+/// 手写笔、语音、拼音未选字都走这一段——此时 `TextEditingValue.text` 里是**还没确认**的内容。
+/// 预上屏期间不回存草稿（否则半截字下次进会话又被带回来）；发送清空前先用 `commitComposing` 落字。
+bool isImeComposing(TextEditingValue v) => v.composing.isValid && !v.composing.isCollapsed;
+
+/// v3.3.1（手写适配）：把预上屏内容落成正文。
+/// 发送路径上若输入法还挂着 composing，直接 `clear()` 之后它可能把刚才那句再推回来
+/// （表现为「发完又冒出一段字」）。先落字再清空，语义就干净了。
+TextEditingValue commitComposing(TextEditingValue v) =>
+    v.composing.isValid ? v.copyWith(composing: TextRange.empty) : v;
+
 /// v3.0.0(热修 07)：草稿签名——会话 + 最终生效模式 + 文本 + 图片路径；任一变化即换新
 /// requestId（例：排队发送结果未知后改用插队 → 新 requestId → 插队真正执行而非回放旧结果）。
 String composerSignature(String sessionId, String mode, String text, List<String> imagePaths) =>
@@ -231,9 +242,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// v2.7：输入变化 → 按会话保存草稿（返回/重进后恢复；清空即移除）。
   /// v2.7.2(B 方案)：输入变化同时刷新「排队发送」胶囊的显隐。
+  /// v3.3.1（手写适配）：预上屏期间不存草稿——手写是一段一段整句替换的，存下来就是半截字。
   void _onDraftChanged() {
     final sid = _mySessionId;
-    if (sid != null) widget.store.saveDraft(sid, _inputCtrl.text);
+    final v = _inputCtrl.value;
+    if (sid != null && !isImeComposing(v)) widget.store.saveDraft(sid, v.text);
     if (mounted) setState(() {});
   }
 
@@ -1879,6 +1892,9 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     final requestId = _pendingRequestId!;
     // 收起键盘，输入框回到原位
+    // v3.3.1（手写适配）：先把预上屏落字再收键盘——手写 IME 若还挂着 composing，
+    // 直接 unfocus/clear 之后可能把刚才那句再推回空输入框（表现为「发完又冒出一段字」）
+    _inputCtrl.value = commitComposing(_inputCtrl.value);
     FocusScope.of(context).unfocus();
     // agent 忙时提示（避免用户以为没反应而重复发送）；插队时不提示排队
     if (_pageAgentStatus == 'running' && preset == null && mode != 'steer') {
@@ -2090,7 +2106,11 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       setState(() => _pendingImages.clear());
       // v3.0.0：发送成功（含排队持存）即清空输入框——此前文字残留，用户误以为没发出而重复发送
-      if (_inputCtrl.text == text) _inputCtrl.clear();
+      // v3.3.1（手写适配）：清空前先落字，避免手写 IME 的 composing 在清空后又把旧句推回来
+      if (_inputCtrl.text == text) {
+        _inputCtrl.value = commitComposing(_inputCtrl.value);
+        _inputCtrl.clear();
+      }
     } catch (e) {
       AppLog.instance.log('Chat: 发送(图)异常 → $e');
       if (!mounted) return;
@@ -2113,7 +2133,10 @@ class _ChatScreenState extends State<ChatScreen> {
         _pendingRequestId = null;
         _pendingSignature = null;
         setState(() => _pendingImages.clear());
-        if (_inputCtrl.text == text) _inputCtrl.clear();
+        if (_inputCtrl.text == text) {
+          _inputCtrl.value = commitComposing(_inputCtrl.value);
+          _inputCtrl.clear();
+        }
         _scheduleQueueRefresh();
         showToast(context, L10n.t('已送达：刚才网络波动，请勿重复发送', 'Delivered despite a network hiccup — do not resend'));
         return;

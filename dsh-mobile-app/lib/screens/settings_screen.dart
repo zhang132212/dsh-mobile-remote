@@ -13,6 +13,7 @@ import '../api.dart';
 import '../dsh_kit.dart';
 import '../floating.dart';
 import '../fmt.dart';
+import '../handwriting.dart';
 import '../l10n.dart';
 import '../logger.dart';
 import '../models.dart';
@@ -900,6 +901,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             DshTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: L10n.t('手写笔测试', 'Stylus test'),
+              subtitle: L10n.t(
+                '用一层原生输入框验证系统全局手写（实验）',
+                'Check system handwriting on a native field (experimental)',
+              ),
+              trailing: DshButton(
+                label: L10n.t('打开', 'Open'),
+                size: DshButtonSize.sm,
+                variant: DshButtonVariant.outline,
+                onPressed: _openHandwritingProbe,
+              ),
+            ),
+            DshTile(
               leading: const Icon(Icons.article_outlined),
               title: L10n.t('应用日志', 'App log'),
               subtitle: L10n.t(
@@ -1333,6 +1348,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static String _reverseLog(String text) {
     final lines = text.split('\n');
     return lines.reversed.where((l) => l.isNotEmpty).join('\n');
+  }
+
+  /// v3.3.1（手写探针）：开一层原生 EditText，看系统「全局手写」能不能接管。
+  /// 能在探针里写出字 → 说明「把输入换成原生输入框」这条补丁路径成立；
+  /// 写不出 → 连原生都不认，只能换别的方案。
+  Future<void> _openHandwritingProbe() async {
+    try {
+      final text = await openHandwritingProbe();
+      if (!mounted || text == null) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(L10n.t('原生输入框回传', 'Native field returned')),
+          content: Text(text.isEmpty ? L10n.t('（空）', '(empty)') : text),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text(L10n.t('好', 'OK')),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) showToast(context, '${L10n.t('打开失败：', 'Failed: ')}$e');
+    }
   }
 
   Future<void> _openDiag() async {
