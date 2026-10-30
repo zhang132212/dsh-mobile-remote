@@ -41,10 +41,6 @@ class MainActivity : FlutterActivity() {
     // v3.1.2（csborbbnc 反馈）：系统文件选择器（ACTION_OPEN_DOCUMENT）结果回传暂存
     private var pendingPick: MethodChannel.Result? = null
     private val pickFileRequestCode = 2001
-    // v3.3.1（手写探针）：原生 EditText 页面——验证系统「全局手写」认不认原生输入框
-    private var handwritingChannel: MethodChannel? = null
-    private var pendingHandwriting: MethodChannel.Result? = null
-    private val handwritingRequestCode = 2101
     // v2.7.2 review(FS1)：悬浮球面板动作可能发生在冷启动（进程已被系统杀死时点"打开会话/充值/通知"），
     // 此时走 onCreate 而非 onNewIntent；Flutter 引擎未就绪前先暂存，configureFlutterEngine 后再投递。
     private var pendingOpenAction: String? = null // "charge" | "usage" | "notifs" | "session:<id>"
@@ -77,20 +73,6 @@ class MainActivity : FlutterActivity() {
         floatingChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dsh/floating")
         // v3.1.2（csborbbnc 反馈）：文件下载/上传原生通道
         filesChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dsh/files")
-        // v3.3.1（手写探针）：开一层原生输入框，验证系统全局手写能否接管
-        handwritingChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dsh/handwriting")
-        handwritingChannel?.setMethodCallHandler { call, result ->
-            when (call.method) {
-                "openProbe" -> {
-                    pendingHandwriting = result
-                    startActivityForResult(
-                        Intent(this, HandwritingProbeActivity::class.java),
-                        handwritingRequestCode,
-                    )
-                }
-                else -> result.notImplemented()
-            }
-        }
         filesChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "saveToDownloads" -> {
@@ -569,16 +551,6 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode == handwritingRequestCode) {
-            val res = pendingHandwriting
-            pendingHandwriting = null
-            if (resultCode == RESULT_OK) {
-                res?.success(data?.getStringExtra(HandwritingProbeActivity.EXTRA_TEXT) ?: "")
-            } else {
-                res?.error("cancelled", null, null)
-            }
-            return
-        }
         if (requestCode == pickFileRequestCode) {
             val res = pendingPick
             pendingPick = null
