@@ -138,6 +138,7 @@
             android:name=".HandwritingProbeActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Material.NoActionBar"
+            android:windowSoftInputMode="stateVisible|adjustResize"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|density|uiMode" />
         <!-- 悬浮球常驻服务（v2.7） -->
         <service
