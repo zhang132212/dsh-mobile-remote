@@ -5,9 +5,9 @@
 在手机上远程操作电脑上的 DeepSeek Harness agent：派活、看流式进度、收通知、做审批、管会话——电脑开着，人不在桌前也能把活干完。
 
 > 电脑端插件（Node，挂载在 dsh 的 webServer 上） + 安卓原生 App（Flutter）。
-> 当前发布：**App `3.2.15+38`** · **插件 `3.1.5-eun.1`** · tag [`v3.2.15`](https://github.com/zhang132212/dsh-mobile-remote/releases/tag/v3.2.15) · MIT
+> 当前发布：**App `3.2.16+39`** · **插件 `3.1.5-eun.1`** · tag [`v3.2.16`](https://github.com/zhang132212/dsh-mobile-remote/releases/tag/v3.2.16) · MIT
 >
-> 分支：**`main` 本分支（安卓发布线）** · `ios`（iOS 移植，未发布） · `plugin`（插件源码，不含 App）
+> 分支：`main`（安卓发布线） · `ios`（iOS 移植，未正式发布） · `plugin`（插件源码，不含 App） · **`feat/pdf-viewer` 本分支（v3.2.16 的 PDF 阅读，待并入 `main`）**
 
 | 首页 | 对话 | 通知 |
 |---|---|---|
@@ -88,7 +88,7 @@ agent 写完代码，对话末尾出现「本轮改动」卡片：改了 N 个�
 
 电脑上的文件不用下载到手机再找 App 打开，直接在对话里点开读：
 
-- **Markdown / 纯文本**：按官方 Markdown 阶梯排版，目录跳转
+- **Markdown / 纯文本**：按官方 Markdown 阶梯排版，目录跳转；Windows 上编辑的 CRLF 换行文件同样正常
 - **HTML**：容错解析成可读版面；需要时切「交互模式」，交给系统 WebView 真跑脚本，按钮 / 表单 / JS 弹窗可用（页面里的相对路径 JS / CSS / 图片从电脑端拉，限定在文档目录内）
 - **SVG**：纯 Dart 矢量渲染（含 path 全命令、transform、text），不引第三方库；可展开看源码
 - **XML / JSON**：折叠树 + 类型标注，JSONC 容错；超大文档截断并告警
@@ -150,7 +150,7 @@ agent 写完代码，对话末尾出现「本轮改动」卡片：改了 N 个�
 
 ```powershell
 # 1) 装插件（tag 锁定版本；也可下载 Release 里的 .tgz 本地安装）
-dsh plugin add github:zhang132212/dsh-mobile-remote#v3.2.15
+dsh plugin add github:zhang132212/dsh-mobile-remote#v3.2.16
 
 # 只要插件、不想拉整个 App 工程
 dsh plugin add github:zhang132212/dsh-mobile-remote#plugin
@@ -178,7 +178,7 @@ dsh plugin add github:zhang132212/dsh-mobile-remote#plugin
 
 ```powershell
 # profile 的 package.json 加依赖
-"dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.15"
+"dsh-mobile-remote": "github:zhang132212/dsh-mobile-remote#v3.2.16"
 # 安装
 corepack pnpm install
 # 启动
@@ -192,6 +192,8 @@ npx @deepseek-ai/dsh web
 从 [Releases](https://github.com/zhang132212/dsh-mobile-remote/releases/latest) 下载附件里的 `.apk` 安装（允许"安装未知来源应用"）。
 
 自行构建见 [dsh-mobile-app/README.md](dsh-mobile-app/README.md)：`flutter build apk --release`，正式分发需自建 keystore（换签名 = 换应用，用户必须卸载重装并重新扫码）。
+
+iOS 侧不提供正式安装包：GitHub Actions 会构建未签名 IPA（Release [`ios-unsigned`](https://github.com/zhang132212/dsh-mobile-remote/releases/tag/ios-unsigned)），需用 AltStore / Sideloadly 以个人 Apple ID 自签。
 
 ### 4.4 建立连接
 
@@ -278,11 +280,11 @@ npx @deepseek-ai/dsh web
 
 | 项 | 要求 |
 |---|---|
-| DSH / 桌面端 | 机制基线 `0.1.2-rc.1`（DSH Desktop v2.0.5）：双端审批走 `$events` 通道 + 瀑布 answerer。更旧的内核自动走帧桥；纯 headless 形态下插件静默不动作 |
+| DSH / 桌面端 | 机制基线 `0.1.2-rc.1`（DSH Desktop v2.0.5）：双端审批走 `$events` 通道 + 瀑布 answerer。更旧的内核自动走帧桥；纯 headless 形态下插件静默不动作。v3.2.15 起已按 0.2.x 内核（多步工具调用）的实际行为适配；`peerDependencies` 仍写着 `<0.2.0`，属元数据滞后——被 peer 检查拦下时，用 Release 附件里的 `.tgz` 直接装 |
 | dsh-mobile-remote 插件 | 与 App 版本号独立演进（两端可不同版本）；升级后先跑一次环境诊断，红了就是需要适配的地方 |
 | 手机 | Android 7.0+，64 位；Impeller 渲染异常时可在 manifest 关掉回落 Skia |
 | 构建 | Flutter 3.35+（Dart SDK `^3.13`）+ Android SDK |
-| iOS | **未开发**。Dart 代码平台无关，配置项见 [docs/09-compatibility.md](docs/09-compatibility.md) §4，欢迎有 Mac 的贡献者接手 |
+| iOS | **未正式发布**。iOS 移植在 `ios` 线，GitHub Actions 另出未签名 IPA（AltStore / Sideloadly 自签）；Dart 代码平台无关，配置项见 [docs/09-compatibility.md](docs/09-compatibility.md) §4 |
 | 宿主 | Windows / macOS；命令行与桌面端同一 profile，插件自动加载 |
 
 **版本差不会崩**——协议只加字段：
@@ -311,7 +313,7 @@ lib/
 dsh-mobile-app/                 Flutter App
   lib/screens/                  首页 / 对话 / 会话 / 通知 / 设置 / 用量 / 文档
   lib/review/                   改动卡片、变更审阅页、diff 渲染
-  lib/docs/                     文档阅读器（md / html / svg / xml / json / docx / xlsx）
+  lib/docs/                     文档阅读器（md / html / svg / xml / json / docx / xlsx / pdf）
   lib/update/                   自更新（清单、验签、安装）
   android/…/FloatingBubbleService.kt   悬浮球
 docs/                           设计、协议、安全、测试、部署文档（见下表）
@@ -354,7 +356,7 @@ node tools/e2e-check.mjs                  # 端到端冒烟
 ```powershell
 cd dsh-mobile-app
 flutter analyze                            # 应为 No issues found
-flutter test                               # 300+ 用例
+flutter test                               # 364 例
 flutter build apk --release                # 产物在 build\app\outputs\flutter-apk\
 ```
 
