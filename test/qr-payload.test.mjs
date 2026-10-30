@@ -152,7 +152,22 @@ async function qrUrlFor(backend) {
 	const qrSrc = srcs[0];
 	assert.match(qrSrc, /\/qr\.png\?text=/, `二维码地址应指向挂载路径下的 qr.png：${qrSrc}`);
 	const text = decodeURIComponent(qrSrc.split('text=')[1]);
-	return parsePayload(text);
+	return { ...parsePayload(text), pageText: collectText(tree).join('\n') };
+}
+
+/** 深度遍历元素树，收集文本节点。 */
+function collectText(node, out = []) {
+	if (node == null || node === false) return out;
+	if (typeof node === 'string' || typeof node === 'number') {
+		out.push(String(node));
+		return out;
+	}
+	if (Array.isArray(node)) {
+		for (const child of node) collectText(child, out);
+		return out;
+	}
+	if (typeof node === 'object' && node.props) collectText(node.props.children, out);
+	return out;
 }
 
 test('LAN 桥模式：url 已带挂载路径时不得再拼一次（回归 /m/m）', async () => {
@@ -174,6 +189,26 @@ test('自定义挂载路径：按服务端返回的 path 生效，且不重复�
 test('地址带尾斜杠（旧服务端）：归一后只拼一次挂载路径', async () => {
 	const { url } = await qrUrlFor({ urls: ['http://192.168.1.5:3080/', 'http://127.0.0.1:3080/'] });
 	assert.equal(url, 'http://192.168.1.5:3080/m');
+});
+
+test('明文公网入口被排除时，设置页警告且二维码仍用局域网地址', async () => {
+	const { url, pageText } = await qrUrlFor({
+		urls: ['http://192.168.1.5:3082/m', 'http://127.0.0.1:3082/m'],
+		insecurePublicHttp: [{ url: 'http://vps.example:8080', included: false }],
+	});
+	assert.equal(url, 'http://192.168.1.5:3082/m');
+	assert.match(pageText, /vps\.example:8080/);
+	assert.match(pageText, /allowInsecurePublicHttp/);
+	assert.match(pageText, /已从二维码和候选地址中排除/);
+});
+
+test('显式放行的明文公网入口仍然警告', async () => {
+	const { pageText } = await qrUrlFor({
+		urls: ['http://192.168.1.5:3082/m', 'http://vps.example:8080/m'],
+		insecurePublicHttp: [{ url: 'http://vps.example:8080', included: true }],
+	});
+	assert.match(pageText, /allowInsecurePublicHttp 放行/);
+	assert.match(pageText, /建议改为 https/);
 });
 
 test('口令随载荷下发，且优先选非回环地址', async () => {

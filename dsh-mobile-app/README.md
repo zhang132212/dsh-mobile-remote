@@ -21,7 +21,7 @@ flutter build apk --release
 # 产物：build\app\outputs\flutter-apk\app-release.apk
 ```
 
-**Release 签名**：正式分发须自建 keystore（`android/key.properties` 存在时自动使用；不存在则回退 debug 签名，仅自用）：
+**Release 签名**：正式分发须自建 keystore。`android/key.properties` 存在时自动使用；不存在时 `flutter build apk --release` **失败**（不再回退 debug 签名）。调试用 `flutter run` / `flutter build apk --debug`。仅测试分发可设 `ORG_GRADLE_PROJECT_allowDebugSignedRelease=true`（debug 密钥，不能覆盖正式包）：
 
 ```powershell
 keytool -genkeypair -v -keystore android/app/release.jks -keyalg RSA -keysize 2048 -validity 10950 -alias dsh
@@ -39,7 +39,7 @@ keytool -genkeypair -v -keystore android/app/release.jks -keyalg RSA -keysize 20
 
 ## 兼容性
 
-- Android 7.0+ 全品牌（实测：小米 17 Pro Max）；iOS 未开发（Dart 代码平台无关，配置项见 docs/09 §4）。
+- Android 7.0+ 全品牌（实测：小米 17 Pro Max）。iOS 移植在仓库 `ios` 分支，尚未正式发布（见 docs/09 §4）。
 - 功能/服务依赖与降级行为见仓库根 `docs/09-compatibility.md`。
 ## 安装使用
 
@@ -67,7 +67,7 @@ assets/
 ## 安全说明
 
 - 连接信息（地址+口令）仅保存在本机 SharedPreferences，不联网上传。
-- 仅限局域网/可信内网使用；App 已放行明文 HTTP（`usesCleartextTraffic`），勿在公网使用。
+- 局域网明文 HTTP 已放行（`usesCleartextTraffic`，否则家里连不上）。连到非局域网的 `http://` 时会先警告；公网入口请用 HTTPS。
 - 二维码含访问口令，请勿截屏转发。
 ## 许可
 

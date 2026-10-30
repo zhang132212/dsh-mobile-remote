@@ -50,3 +50,6 @@ app.*.map.json
 # Gradle build caches (contain local paths)
 android/.gradle/
 .gradle/
+
+# flutter test 黄金图比对失败时的输出，不进 git
+test/failures/

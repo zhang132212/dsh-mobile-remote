@@ -493,7 +493,9 @@
 ### 6.10 GET /m/api/qr-config（桌面二维码数据，v2.1）
 **仅电脑本机可访问**（TCP 层 socket 来源，仅 loopback 可访问；否则 403 `loopback-only`）—— 桌面 dsh 设置页客户端模块用它生成「连接移动端设备」二维码。
 > v2.6.0：`/m/qr.png`（二维码图片渲染，供设置页 `<img>` 使用）同样收口——Host 校验 + loopback 来源，非本机 403。
-**响应**：`{ "ok": true, "urls": ["http://192.168.1.100:3080/m", ...], "token": "<authToken>", "path": "/m" }`
+**响应**：`{ "ok": true, "urls": ["http://192.168.1.100:3080/m", ...], "token": "<authToken>", "path": "/m", "insecurePublicHttp": [{ "url": "http://vps.example:8080", "included": false }] }`
+
+> `insecurePublicHttp`：`publicUrls` 里非局域网的 `http://`。`included: false` 表示已从 `urls` 排除（默认）；`allowInsecurePublicHttp: true` 时 `included: true` 且地址仍在 `urls` 里。桌面设置页用它显示警告。旧客户端忽略该字段。
 
 > v3.0.0：`lanBridge.enabled` 且监听成功时，`urls` 首选为桥地址（`http://<电脑局域网IP>:<lanBridge.port>/m`，端口默认 3080）；绑定失败自动回退 webserver 地址（不指向死端口）。
 

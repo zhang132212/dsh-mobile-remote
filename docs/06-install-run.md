@@ -156,7 +156,7 @@ corepack pnpm install
         trustedHosts: ["<中继域名或IP>"]    # 如 frp-boy.com / xxx.natfrp.com
 ```
 
-> 隧道类注意：域名接入国内托管/反代通常要求 **ICP 备案**（自有域名绑定公网服务必然遇到）；未备案时请选择**免备案节点地址/自带域名**，并务必保证 **TLS**（公网明文 HTTP = 口令暴露，违反 04-security 禁止项）；若隧道方案拿不到 TLS/免备案入口，请转向 §5.1 的虚拟组网。
+> 隧道类注意：域名接入国内托管/反代通常要求 **ICP 备案**（自有域名绑定公网服务必然遇到）；未备案时请选择**免备案节点地址/自带域名**，并务必保证 **TLS**（公网明文 HTTP = 口令暴露）。把入口写进 `publicUrls` 时用 `https://`。非局域网的 `http://` 默认不进二维码；只有确认接受明文时才加 `allowInsecurePublicHttp: true`。若隧道方案拿不到 TLS/免备案入口，请转向 §5.1 的虚拟组网。
 - 全部方案通用：`authToken` 保持开启、别把 3080 裸奔暴露公网；换隧道/换节点后更新手机地址与 `trustedHosts` 即可。
 
 ## 6. 推送桥配置（可选，部署者 3 分钟）
@@ -276,7 +276,7 @@ flutter build apk --release
 # 产物：build\app\outputs\flutter-apk\app-release.apk
 ```
 
-**Release 签名（发布前必做）**：正式分发必须用你自己的 keystore（否则用的 debug 签名，且换签名=换应用、用户需卸载重装）：
+**Release 签名（发布前必做）**：正式分发必须用你自己的 keystore。没有 `key.properties` 时 `flutter build apk --release` 会直接失败，不再回退 debug 签名（debug 构建不需要这份文件）：
 
 ```powershell
 # ① 生成 keystore（记住密码；jks 与 key.properties 均已 gitignore，勿提交、勿丢失）
@@ -288,8 +288,11 @@ keytool -genkeypair -v -keystore android/app/release.jks -keyalg RSA -keysize 20
 # keyAlias=dsh
 # storeFile=app/release.jks
 
-# ③ 构建（build.gradle.kts 自动读取 key.properties；不存在则回退 debug 签名）
+# ③ 构建（build.gradle.kts 读取 key.properties；缺失则失败）
 flutter build apk --release
+
+# 仅测试分发、接受 debug 签名时：
+# ORG_GRADLE_PROJECT_allowDebugSignedRelease=true flutter build apk --release
 ```
 
 > 首次构建需下载 Gradle 依赖（约 5-10 分钟）；若报 Kotlin 增量缓存损坏（`Could not close incremental caches`），`android/gradle.properties` 已设 `kotlin.incremental=false`，删除 `build` 与 `.dart_tool` 后重试。
@@ -299,7 +302,7 @@ flutter build apk --release
 1. 把 APK 传到手机（微信文件传输/网盘/USB），点击安装（需允许"安装未知来源应用"）。
 2. 打开 App →「扫码连接」对准电脑屏幕上的二维码（桌面 DSH 设置 →「连接移动端设备」页）；或手动输入电脑地址 + 访问口令。
 3. 连接成功进入首页，直接发消息派活。
-> 说明：Android 9+ 默认禁止明文 HTTP，App 已配置 `usesCleartextTraffic`，仅限局域网/内网使用，勿暴露公网。
+> 说明：Android 9+ 默认禁止明文 HTTP。App 仍放行明文，否则局域网连不上。连到非局域网的 `http://` 时 App 会先警告；公网入口请用 HTTPS。
 > 换签名安装会报「签名不一致」：先卸载旧版再装新版（连接信息需重新扫码）。
 ### 8.4 重建与更新
 - 插件/网页端改动 → 按 §3 同步并重启 DSH。

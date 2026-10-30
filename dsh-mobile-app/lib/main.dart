@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'l10n.dart';
 import 'api.dart';
+import 'net_safety.dart';
 import 'store.dart';
 import 'floating.dart';
 import 'dsh_kit.dart';
@@ -25,6 +26,66 @@ import 'screens/sheets.dart';
 import 'screens/usage_screen.dart';
 
 final AppStore store = AppStore();
+
+/// 用户正要连到非局域网的 http。先确认，再发口令。
+Future<bool> confirmInsecurePublicHttp(BuildContext context, String base) {
+  return showDialog<bool>(
+    context: context,
+    builder: (ctx) {
+      final c = DshPalette.of(ctx);
+      return AlertDialog(
+        title: Text(L10n.t('明文连接到公网', 'Plain HTTP to a public address')),
+        content: Text(
+          L10n.t(
+            '「$base」不是局域网地址，却使用 http://。访问口令会明文经过网络，可能被窃听。\n局域网和虚拟组网（192.168 / 10 / 172.16 / 100.64）不受影响。请改用 https://。只有在你确认这条链路可以接受明文时才继续。',
+            '"$base" is not a LAN address, but it uses http://. The access token will travel in plaintext and can be eavesdropped.\nLAN and virtual-network addresses (192.168 / 10 / 172.16 / 100.64) are unchanged. Prefer https://. Continue only if you accept plaintext on this path.',
+          ),
+          style: DshType.s14.copyWith(color: c.ink2),
+        ),
+        actions: [
+          DshButton(
+            label: L10n.t('取消', 'Cancel'),
+            variant: DshButtonVariant.ghost,
+            size: DshButtonSize.sm,
+            onPressed: () => Navigator.of(ctx).pop(false),
+          ),
+          DshButton(
+            label: L10n.t('仍要连接', 'Connect anyway'),
+            size: DshButtonSize.sm,
+            onPressed: () => Navigator.of(ctx).pop(true),
+          ),
+        ],
+      );
+    },
+  ).then((ok) => ok == true);
+}
+
+/// 已经连在明文公网地址上（冷启动或自动切换）。不打断连接，只说清楚风险。
+Future<void> notifyInsecurePublicHttp(BuildContext context, String base) {
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) {
+      final c = DshPalette.of(ctx);
+      return AlertDialog(
+        title: Text(L10n.t('当前连接是公网明文 HTTP', 'This connection is public plain HTTP')),
+        content: Text(
+          L10n.t(
+            '正在使用「$base」。访问口令可能被窃听。建议把穿透入口改成 https://，或改用虚拟组网。局域网连接不需要改。',
+            'Using "$base". The access token may be eavesdropped. Prefer an https:// tunnel, or a virtual network. LAN connections are fine.',
+          ),
+          style: DshType.s14.copyWith(color: c.ink2),
+        ),
+        actions: [
+          DshButton(
+            label: L10n.t('知道了', 'OK'),
+            size: DshButtonSize.sm,
+            onPressed: () => Navigator.of(ctx).pop(),
+          ),
+        ],
+      );
+    },
+  );
+}
 
 /// 全局导航 key（悬浮球面板等跨页面入口用）。
 final rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -407,6 +468,7 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
   int _index = 0;
   bool _reconfiguring = false; // 重新配置进行中：显示连接页但保留旧配置，取消可回退
   final _drawerKey = GlobalKey<ScaffoldState>();
+  String? _warnedInsecureBase;
 
   @override
   void initState() {
@@ -418,11 +480,29 @@ class _RootScreenState extends State<RootScreen> with WidgetsBindingObserver {
     _configured = api.baseUrl.isNotEmpty && api.token.isNotEmpty;
     if (_configured) {
       _boot();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _maybeWarnInsecurePublicHttp());
     }
   }
 
   void _onStore() {
     if (mounted) setState(() {});
+    _maybeWarnInsecurePublicHttp();
+  }
+
+  /// 冷启动或自动切到非局域网 http 时提示一次。连接页里已经确认过的地址不再弹。
+  void _maybeWarnInsecurePublicHttp() {
+    if (!_configured || _reconfiguring || !mounted) return;
+    final base = api.baseUrl;
+    if (!isInsecurePublicHttp(base) || insecurePublicHttpAcknowledged(base)) {
+      return;
+    }
+    if (_warnedInsecureBase == base) return;
+    _warnedInsecureBase = base;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _reconfiguring) return;
+      acknowledgeInsecurePublicHttp(base);
+      notifyInsecurePublicHttp(context, base);
+    });
   }
 
   @override
@@ -806,6 +886,22 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
     if (!base.startsWith('http')) base = 'http://$base';
     base = base.replaceAll(RegExp(r'/+$'), '');
     if (base.endsWith('/m')) base = base.substring(0, base.length - 2);
+    if (!mounted) return;
+    setState(() => _busy = true);
+    if (isInsecurePublicHttp(base)) {
+      final ok = await confirmInsecurePublicHttp(context, base);
+      if (!ok) {
+        if (mounted) {
+          setState(() {
+            _busy = false;
+            _status = L10n.t('已取消：该地址是公网明文 HTTP', 'Cancelled: that address is public plain HTTP');
+          });
+        }
+        return;
+      }
+      acknowledgeInsecurePublicHttp(base);
+    }
+    if (!mounted) return;
     setState(() {
       _busy = true;
       _status = L10n.t('连接中…', 'Connecting…');

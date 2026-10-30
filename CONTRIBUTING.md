@@ -12,7 +12,7 @@
 ## 开发环境
 
 - **插件**：Node.js 18+；在 `~/.dsh/profiles/<desktop|web>` 以 `file:` 依赖引入（见 docs/06-install-run.md；桌面版移动端用 LAN 桥）
-- **App**：Flutter 3.35+（本仓在 3.47.x 上验证）+ Android SDK；`flutter analyze` 必须零问题
+- **App**：Flutter 3.47.x（Dart SDK `^3.13`）+ Android SDK；`flutter analyze` 必须零问题
 
 ## 分支模型
 

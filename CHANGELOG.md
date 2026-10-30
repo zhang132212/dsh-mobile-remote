@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **peerDependencies**：`@deepseek-ai/dsh-*` 放宽到 0.2.x（含 `0.2.1-rc.2`、`0.2.2-alpha.2` 这类预发布，覆盖到 `0.2.20`），不再卡在 `<0.2.0`。不含 0.3。
+- **Release 签名**：没有 `android/key.properties` 时 release 构建失败，不再静默使用 debug 签名。debug 构建不受影响。测试包可设 `ORG_GRADLE_PROJECT_allowDebugSignedRelease=true`。
+- **明文公网入口**：`publicUrls` 里非局域网的 `http://` 默认不进二维码和候选地址（日志 + 设置页警告）。局域网 HTTP 不变。`allowInsecurePublicHttp: true` 可显式放行。App 连到非私网 `http` 时会提示。
+- **CI**：根目录 `npm test`，GitHub Actions 跑插件测试以及 `flutter analyze` / `flutter test`（Flutter 3.47.0）。没有 Windows 等线字体时跳过 golden。
+- 删掉误提交的 `dsh-mobile-app/test/failures/`；`.gitignore` 中文注释恢复为 UTF-8。
+
 ## v3.2.16（2026-10-26）— PDF 也能在 App 里读
 
 > 版本：App `3.2.16+39` / 插件 `3.1.5-eun.1`（插件无改动，纯客户端）。

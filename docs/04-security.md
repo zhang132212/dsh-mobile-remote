@@ -51,9 +51,20 @@
 | 局域网（可信 WiFi） | 无 TLS，明文 | 家用 WiFi 信任模型；口令启用时明文风险可接受 |
 | 虚拟组网（蒲公英/Tailscale） | **WireGuard 端到端加密 + 设备身份** | 外出唯一通路（蒲公英国内可用，实测推荐） |
 | HTTPS 反代（可选，v2.6 文档化） | TLS（受信任 CA / 手机安装内网 CA 根证书） | 不信任 WiFi / 公网反代场景；部署见 06-install-run §6b |
-| 公网裸 HTTP | **禁止** | 运维约束：不映射端口、不做 NAT 穿透到 3080 |
+| 公网裸 HTTP | **默认拒绝** | `publicUrls` 里非局域网的 `http://` 不进二维码 / 候选地址。显式 `allowInsecurePublicHttp: true` 才放行，并在日志和设置页警告。App 连到非私网 `http` 时必须确认 |
 
 明文路径下口令可能被同网段监听者截获——这是**明确的残余风险**，缓解手段：仅可信 WiFi 使用、口令启用、定期更换。
+
+### 3c. 明文公网入口（publicUrls）
+
+局域网 HTTP（含 LAN 桥、`192.168` / `10` / `172.16` / Tailscale `100.64/10`、`.local` 等主机名）保持可用，token 不出这张网。
+
+`publicUrls` 里主机不是上述私网、协议又是 `http://` 的条目：
+
+- 默认**不**写入 `/m/api/qr-config` 的二维码，也**不**写入 `/m/api/bootstrap` 的 `server.urls`。
+- 启动日志和桌面「连接移动端设备」页说明原因，并给出放行开关。
+- `allowInsecurePublicHttp: true` 后重新放进二维码，警告仍在。
+- App 端独立再查一次：扫码或手填的非私网 `http` 要先点「仍要连接」才会把口令发出去；已经保存的这类地址，或自动切换过去时，会再提示一次。Android 仍放行明文（`usesCleartextTraffic`），否则局域网连不上——系统无法按「是否私网 IP」关掉明文。
 
 ### 3b. LAN 桥（v3.0.0：桌面版局域网直连的官方通道）
 > 背景：DSH Desktop（0.1.1-rc.2 起）强制 webserver 只听 `127.0.0.1`（`dsh-plugin-desktop` 的 DesktopWebServer 构造器对非回环 host 直接 throw，用户 patch 无法覆盖），手机无法直连桌面版。插件在 DSH 进程内自建第二个 HTTP 监听（`lanBridge`，默认 `0.0.0.0:3080`），把 `/m/api*` 流式转发到回环 webserver（SSE 透传）。
