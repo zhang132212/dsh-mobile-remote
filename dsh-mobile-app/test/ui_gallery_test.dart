@@ -32,6 +32,13 @@ const Size _canvas = Size(390, 1560);
 const Size _chatCanvas = Size(390, 1080);
 
 void main() {
+  // Golden 主图在 Windows 上用「等线 Deng.ttf」生成。Linux CI 没有这套字体，
+  // 字形栅格也对不齐，直接比对会稳定失败。缺字体时跳过；其余 flutter test 照常跑。
+  if (!File(r'C:\Windows\Fonts\Deng.ttf').existsSync()) {
+    test('golden 走查需要 Windows 等线 Deng.ttf，当前环境跳过', () {}, skip: true);
+    return;
+  }
+
   setUpAll(() async {
     const families = <String>[
       'Roboto',

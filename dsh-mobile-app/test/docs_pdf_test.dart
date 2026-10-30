@@ -6,7 +6,6 @@
 //   ③ 阅读页：用 mock 的原生通道跑通「打开 → 渲染 → 页码」整条链，
 //      并验证平台没实现时给的是可读提示而不是崩。
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

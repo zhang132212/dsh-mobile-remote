@@ -2,6 +2,7 @@
 // 覆盖：mergeUrls 去重/规范化/排除回环/首位保持、rotateBaseUrl 轮换与单地址不切换。
 import 'package:flutter_test/flutter_test.dart';
 import 'package:dsh_mobile_app/api.dart';
+import 'package:dsh_mobile_app/net_safety.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -41,6 +42,14 @@ void main() {
       expect(a.baseUrl, 'http://100.64.0.7:3080');
       expect(a.rotateBaseUrl(), isTrue);
       expect(a.baseUrl, 'http://192.168.1.100:3080');
+    });
+
+    test('rotateBaseUrl：公网 http 仍可切换（不静默丢掉候选）', () {
+      final a = newApi('http://192.168.1.100:3080');
+      a.mergeUrls(['http://192.168.1.100:3080', 'http://vps.example:8080']);
+      expect(a.rotateBaseUrl(), isTrue);
+      expect(a.baseUrl, 'http://vps.example:8080');
+      expect(isInsecurePublicHttp(a.baseUrl), isTrue);
     });
 
     test('rotateBaseUrl：仅一个地址时不切换', () {

@@ -1,0 +1,44 @@
+# 插件单测 + Flutter analyze / test。
+# Flutter 钉在 3.47.0，与 docs/06-install-run.md、dsh-mobile-app/pubspec.yaml（Dart ^3.13）一致。
+# Golden 主图依赖 Windows「等线」Deng.ttf，Linux 上字形对不齐，测试文件在缺字体时自行跳过。
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  plugin:
+    name: Node plugin tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install runtime deps for tests that import lib/index.js
+        # 这些包是 peer，不进本仓库的 dependencies。钉在已发布的 0.2.1-rc.2，
+        # 与维护者正在用的 DSH 一致；qrcode / schemastery 是插件本体的直接依赖。
+        run: npm install --ignore-scripts --no-save --no-package-lock qrcode@1.5.4 @deepseek-ai/schemastery@3.18.5 @deepseek-ai/dsh-llm@0.2.1-rc.2 @deepseek-ai/dsh-credentials@0.2.1-rc.2 @deepseek-ai/dsh-sandbox-policy@0.2.1-rc.2 @deepseek-ai/dsh-scope@0.2.1-rc.2
+      - name: Plugin tests
+        run: npm test
+
+  app:
+    name: Flutter analyze and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.0"
+          channel: stable
+          cache: true
+      - name: Resolve packages
+        working-directory: dsh-mobile-app
+        run: flutter pub get
+      - name: Analyze
+        working-directory: dsh-mobile-app
+        run: flutter analyze
+      - name: Test
+        working-directory: dsh-mobile-app
+        run: flutter test

@@ -7,7 +7,7 @@
 > 电脑端插件（Node，挂载在 dsh 的 webServer 上） + 安卓原生 App（Flutter）。
 > 当前发布：**App `3.2.16+39`** · **插件 `3.1.5-eun.1`** · tag [`v3.2.16`](https://github.com/zhang132212/dsh-mobile-remote/releases/tag/v3.2.16) · MIT
 >
-> 分支：`main`（安卓发布线） · `ios`（iOS 移植，未正式发布） · `plugin`（插件源码，不含 App） · **`feat/pdf-viewer` 本分支（v3.2.16 的 PDF 阅读，待并入 `main`）**
+> 分支：`main`（安卓发布线） · `ios`（iOS 移植，未正式发布） · `plugin`（插件源码，不含 App）
 
 | 首页 | 对话 | 通知 |
 |---|---|---|
@@ -210,7 +210,7 @@ iOS 侧不提供正式安装包：GitHub Actions 会构建未签名 IPA（Releas
 
 ### 4.5 不在同一局域网
 
-插件的定位是**可信内网**。外出时用虚拟组网（蒲公英等，实测可用），把电脑的虚拟 IP 当第二个地址填进 App，之后自动切换；穿透方案（frp 等）需把中继域名写进 `trustedHosts`，入口地址写进 `publicUrls` 一并进二维码，并务必配强口令。
+插件的定位是**可信内网**。外出时用虚拟组网（蒲公英等，实测可用），把电脑的虚拟 IP 当第二个地址填进 App，之后自动切换；穿透方案（frp 等）需把中继域名写进 `trustedHosts`，入口地址写进 `publicUrls` 一并进二维码，并务必配强口令。`publicUrls` 请用 `https://`。非局域网的 `http://` 默认不会进二维码（口令会明文出门）；确认这条链路可以接受明文时，再设 `allowInsecurePublicHttp: true`。
 
 **不要把 3080 直接映射到公网。**
 
@@ -245,7 +245,8 @@ iOS 侧不提供正式安装包：GitHub Actions 会构建未签名 IPA（Releas
 | `sessionTtlMs` | 30 天 | 登录有效期 |
 | `maxConnections` | `16` | SSE 连接数上限（每台手机常驻 1~2 条） |
 | `trustedHosts` | `[]` | 额外放行的 Host（穿透/中继场景显式声明，不带端口） |
-| `publicUrls` | `[]` | 写进二维码的公网 / 穿透入口，供多设备与外网使用 |
+| `publicUrls` | `[]` | 写进二维码的公网 / 穿透入口。非局域网的 `http://` 默认排除，请用 `https://` |
+| `allowInsecurePublicHttp` | `false` | 显式放行上面的明文公网入口。放行后日志和设置页仍会警告 |
 | `pushUrls` | `[]` | 推送通道：`serverchan` / `ntfy` / `bark` / `generic` |
 | `pushCooldownMs` | `60000` | 同会话同类通知的最小间隔 |
 | `doneGraceMs` | `15000` | agent 转为 idle 后需稳定多久才算"真结束" |
@@ -264,6 +265,7 @@ iOS 侧不提供正式安装包：GitHub Actions 会构建未签名 IPA（Releas
 已经做的：
 
 - **口令即凭据**：`authToken` 校验后发 cookie，失败按窗口限流；二维码含口令，等于凭据，别截图转发
+- **公网入口默认 HTTPS**：`publicUrls` 里非局域网的 `http://` 不进二维码和候选地址；局域网 HTTP 保持可用。App 连到非私网 `http` 时会先确认
 - **二维码数据不出本机**：`/api/qr-config` 仅允许回环访问
 - **LAN 桥最小暴露**：只转发 `${path}` 前缀的移动端面，不转发内核网关与二维码接口
 - **非 GET 跨站防护**：`Sec-Fetch-Site` 或来源主机不在允许集 → 403
@@ -280,10 +282,10 @@ iOS 侧不提供正式安装包：GitHub Actions 会构建未签名 IPA（Releas
 
 | 项 | 要求 |
 |---|---|
-| DSH / 桌面端 | 机制基线 `0.1.2-rc.1`（DSH Desktop v2.0.5）：双端审批走 `$events` 通道 + 瀑布 answerer。更旧的内核自动走帧桥；纯 headless 形态下插件静默不动作。v3.2.15 起已按 0.2.x 内核（多步工具调用）的实际行为适配；`peerDependencies` 仍写着 `<0.2.0`，属元数据滞后——被 peer 检查拦下时，用 Release 附件里的 `.tgz` 直接装 |
+| DSH / 桌面端 | 机制基线 `0.1.2-rc.1`（DSH Desktop v2.0.5）：双端审批走 `$events` 通道 + 瀑布 answerer。更旧的内核自动走帧桥；纯 headless 形态下插件静默不动作。v3.2.15 起已按 0.2.x 内核（多步工具调用）适配。`peerDependencies` 接受 `0.1.0-rc.6` 起、整个 0.2 稳定版，以及 `0.2.0`–`0.2.20` 的预发布（含 `0.2.1-rc.2`、`0.2.2-alpha.2`），不含 0.3。npm 不会自动放行「范围里没写到的那个 patch」的预发布，所以每个 0.2.x patch 都写了 `>=0.2.N-0`。稳定版不受这条例外限制 |
 | dsh-mobile-remote 插件 | 与 App 版本号独立演进（两端可不同版本）；升级后先跑一次环境诊断，红了就是需要适配的地方 |
 | 手机 | Android 7.0+，64 位；Impeller 渲染异常时可在 manifest 关掉回落 Skia |
-| 构建 | Flutter 3.35+（Dart SDK `^3.13`）+ Android SDK |
+| 构建 | Flutter 3.47.0（Dart SDK `^3.13`）+ Android SDK |
 | iOS | **未正式发布**。iOS 移植在 `ios` 线，GitHub Actions 另出未签名 IPA（AltStore / Sideloadly 自签）；Dart 代码平台无关，配置项见 [docs/09-compatibility.md](docs/09-compatibility.md) §4 |
 | 宿主 | Windows / macOS；命令行与桌面端同一 profile，插件自动加载 |
 
@@ -345,7 +347,7 @@ prototype/                      早期界面原型
 
 ```powershell
 node --check lib/index.js
-node --test test/*.mjs                    # 回归用例
+npm test                                  # node --test test/*.test.mjs
 node tools/timeline-contract-check.mjs    # 时间线契约
 node tools/account-usage-check.mjs        # 用量归一化
 node tools/e2e-check.mjs                  # 端到端冒烟
@@ -365,6 +367,7 @@ flutter build apk --release                # 产物在 build\app\outputs\flutter
 ```powershell
 flutter test --update-goldens test/ui_gallery_test.dart test/ui_pages_gallery_test.dart
 # 产物：test/goldens/，同步到 docs/screenshots/
+# 比对依赖 Windows 等线 C:\Windows\Fonts\Deng.ttf。没有这套字体时这两组 golden 跳过，其余用例照常跑。
 ```
 
 **发布**：`dsh-mobile-app/tools/package-release.ps1` 打包 APK 与插件 tgz，`tools/publish-manifest.mjs` 生成签名清单。

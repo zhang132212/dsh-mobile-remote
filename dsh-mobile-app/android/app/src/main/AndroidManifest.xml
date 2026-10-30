@@ -11,8 +11,9 @@
     <!-- v3.2.1 应用内更新：Android 8+ 必须显式申请才能拉起系统安装器。
          仅用于「把已验签的 APK 交给系统安装界面」，安装与否仍由用户在系统界面确认。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
-    <!-- v2.9.0 review(A4)：LAN/组网地址是动态 IP，无法域限定 network_security_config；
-         明文放行为已知权衡（token 走局域网，安全文档已列为残余风险；公网场景须经反代 HTTPS） -->
+    <!-- 局域网明文 HTTP（Android 9+ 必须放行，否则家里扫码连不上）。
+         系统分不清「私网 IP」和「公网 IP」，所以这里不能按地址关掉明文。
+         非私网 http 由 App 在连接 / 切换地址时警告；电脑端 publicUrls 的明文公网入口默认不进二维码。 -->
     <application
         android:label="DSH Remote"
         android:name="${applicationName}"

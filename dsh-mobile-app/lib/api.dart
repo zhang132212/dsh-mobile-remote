@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'logger.dart';
 import 'models.dart';
+import 'net_safety.dart';
 import 'review/model.dart';
 
 class ApiException implements Exception {
@@ -239,6 +240,11 @@ class Api {
     final next = baseUrls[(idx + 1) % baseUrls.length];
     if (next == cur) return false;
     baseUrl = next;
+    if (isInsecurePublicHttp(next)) {
+      AppLog.instance.log(
+        '已切换到公网明文 HTTP $next：访问口令可能被窃听。建议改用 HTTPS，或在电脑端关闭这条入口。',
+      );
+    }
     // 持久化新活动地址（失败不影响内存态切换）
     unawaited(() async {
       try {

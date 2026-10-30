@@ -17,7 +17,7 @@
 | 字段级兼容（v3.1.1） | `/m/api/directories` 根视图新增 `sep`（服务端路径分隔符）；新插件+旧 App 忽略该字段即可（旧 App 在 WSL 上仍按 `\` 拼接，由服务端`normalizeServerPath` 归一化兜底，浏览/建夹/建会话均可用）；新 App+旧插件缺少 `sep` 时按根视图推断分隔符——任意组合均可使用 |
 | 用量与额度（v3.2） | 新插件+新 App 通过 `/m/api/account-usage` 显示 DeepSeek/Codex/OpenCode Go；旧 App 忽略新端点。新 App+旧插件进入该入口会显示“电脑端插件版本过旧”，不影响其它功能；升级插件后无需重新配置凭据 |
 | 悬浮球面板用量与额度（v3.2） | 新 App+新插件：面板展开时按需展示三来源区块（金额行文字 + 配额行细条/颜色），整块可点进详情页。新 App+旧插件：区块整体降级为原有单行余额（点击仍=去充值），其余面板功能不受影响；旧 App 忽略新端点。无新增服务端契约 |
-| Flutter 构建环境 | Flutter 3.35+（Dart SDK ^3.13） |
+| Flutter 构建环境 | Flutter 3.47.0（Dart SDK ^3.13） |
 
 **快速自检**：手机 App → 设置 → 环境诊断。`services` 一节列出每个内核服务是否存在；**v3.1.3+ 看 `checks.approvalMode`**（生效策略）与 **`checks.remoteEvents`**（`true` = `$events` 双端呈现通道就绪，`false` = both 降级 mobile 或配置即 mobile/desktop）；`notes` 首行说明当前审批策略实际语义。旧内核（0.1.1-rc.2 及更早）宿主才会出现 `services.apiProxy` / `checks.respondBridge` / `checks.frameBridge` / `checks.pendingFrames`（帧桥 era 探测项，v3.1.3 起仅帧桥激活时输出）——**0.1.2-rc.1+ 宿主看不到这些键属正常**。
 
@@ -86,7 +86,7 @@ App 为 Flutter 原生 APK（`com.dsh.remote`），渲染后端为 **Impeller（
 |---|---|---|
 | 渲染 | ✅ 已验证（小米 17 Pro Max） | Flutter 引擎在无 Vulkan 机型自动回退 GLES；再老机型回退 Skia。历史风险点：部分旧 Mali GPU 的 Impeller 花屏（2024 年问题，现版本基本修复） |
 | 系统版本 | Android 7.0+ | minSdk 跟随引擎默认 |
-| 明文 HTTP | ✅ | `usesCleartextTraffic=true` 已配置（Android 9+） |
+| 明文 HTTP | ✅ 局域网 | `usesCleartextTraffic=true`（Android 9+，否则局域网连不上）。非私网 `http` 连接前会警告 |
 | 扫码 | ✅ | mobile_scanner（CameraX）全品牌通用 |
 | 后台存活 | 部分依赖系统 | 国产 ROM 杀后台会断 SSE；App 有指数退避重连 + 回前台自动探测。系统级提醒走推送桥（ntfy/Bark/Server酱），不依赖 App 存活 |
 | 深色/字体缩放 | ✅ | Flutter 主题自适应 |
@@ -95,14 +95,14 @@ App 为 Flutter 原生 APK（`com.dsh.remote`），渲染后端为 **Impeller（
 
 **如遇渲染异常**：把 `dsh-mobile-app/android/app/src/main/AndroidManifest.xml` 中 `EnableImpeller` 改为 `false` 出一个 Skia 版验证；App 代码无需改动（列表结构两种后端都验证过）。
 
-## 4. iOS（未开发）
+## 4. iOS（移植在 `ios` 分支，未正式发布）
 
-> **原因**：开发者手上没有苹果设备（Mac/iPhone），无法构建、真机调试与签名分发 iOS 版本——因此 iOS 端**暂未开发**。**欢迎社区贡献**：iOS 适配工作量不大，任何有 Mac 的开发者都可以按下面清单完成并提交 PR（见 CONTRIBUTING.md）。
+iOS 平台层在 `ios` 分支（`dsh-mobile-app/ios/` 与平台适配），`main` 上没有正式安装包。Dart 代码与 Android 共用。GitHub Actions 另出未签名 IPA（Release [`ios-unsigned`](https://github.com/zhang132212/dsh-mobile-remote/releases/tag/ios-unsigned)），需用 AltStore / Sideloadly 以个人 Apple ID 自签。
 
-- **Dart 代码零平台依赖**，5 个插件（shared_preferences / http / path_provider / mobile_scanner / url_launcher）均有 iOS 实现；iOS 只有 Impeller 后端，而列表结构恰在 Impeller 下验证过——代码几乎不用改。
-- 需要：Mac + Xcode + Apple 开发者账号（自用免签/TestFlight）。
-- 必须的配置项（预计半天）：`Info.plist` 放行局域网 http（ATS `NSAllowsLocalNetworking`）、iOS 14+ 本地网络权限文案（`NSLocalNetworkUsageDescription`）、相机权限文案。
-- 分发：自用可用免费账号侧载（7 天重签）；公开分发走 TestFlight/App Store（需付费开发者账号）。
+公开分发仍缺签名与真机回归。有 Mac 的贡献者可以在 `ios` 分支上继续（见 CONTRIBUTING.md），至少要补：
+
+- `Info.plist` 放行局域网 http（ATS `NSAllowsLocalNetworking`）、iOS 14+ 本地网络权限文案（`NSLocalNetworkUsageDescription`）、相机权限文案。
+- 自用可用免费账号侧载（7 天重签）；公开分发走 TestFlight / App Store（需付费开发者账号）。
 
 ## 5. 已知问题清单（发布时如实告知）
 
@@ -113,7 +113,7 @@ App 为 Flutter 原生 APK（`com.dsh.remote`），渲染后端为 **Impeller（
 | 3 | 国产 ROM 杀后台导致通知延迟（App 内角标） | 通知不及时 | 推送桥不受影响；App 重连后补拉 |
 | 4 | Impeller 在极老 GPU 的潜在渲染问题（未实测） | 少数旧机可能花屏 | manifest 一行回退 Skia |
 | 5 | 大体积消息（数万字符）首次滚动定位 | 仅首屏定位，无功能损失 | 列表已按段加载（50 条/页） |
-| 6 | 明文 HTTP 通信 | 仅限可信内网 | 设计如此（docs/04-security.md）；公网必须虚拟组网（蒲公英推荐）/ TLS 反代（docs/06 §5/§6b） |
+| 6 | 明文 HTTP 通信 | 局域网仍明文 | 局域网 / 虚拟组网接受。`publicUrls` 的非局域网 `http` 默认不进二维码（`allowInsecurePublicHttp` 可显式放行）。App 连到非私网 `http` 会警告。公网优先虚拟组网或 TLS 反代（docs/04、docs/06 §5） |
 | 7 | 通知记录删除后，同会话同类事件会再生成新通知 | 符合预期（删除≠静音） | 已文档化 |
 | 8 | GIF 发送后显示静态 | 与 PC 端一致（内核附件规范化取首帧重编码）| 动态链路已就绪（Flutter 原生支持），待内核保留动画附件 |
 | 9 | 思维链块仅标题行（图标+字数+箭头）可点击切换，正文为可选中文本（点正文不切换，属设计） | 轻微认知成本 | 已文档化；折叠状态 v3.1.0 起按消息持久化（滚动/重进/重启保持） |
@@ -130,7 +130,7 @@ App 为 Flutter 原生 APK（`com.dsh.remote`），渲染后端为 **Impeller（
 |---|---|---|
 | 设计令牌（有意） | 品牌色 `#426EFE` / 深色 `#0E1116` 等（App `theme.dart`）、`com.dsh.remote`、QR 协议 `DSHREMOTE\|地址\|口令`、`EnableImpeller=true` | 产品设计/通信契约，勿随意改 |
 | 内核耦合词（有意） | 系统消息过滤词 `Current runtime context` / `This snapshot supersedes` / `background job `（App `chat_screen.dart`）、apiProxy 协议字段名 | 与内核/PC 端保持一致的隐藏规则 |
-| 插件可配置项 | `path` / `authToken` / `cookieName` / `sessionTtlMs` / `rechargeUrl` / `maxConnections` / `pushUrls` / `pushCooldownMs` / `pushContent` / `rateLimit` / `trustedHosts` / `doneGraceMs`（v2.8.0）/ `lanBridge`（v3.0.0：`{enabled, port, host}`，默认关）/ `approvalMode`（v3.1.3：`both` 默认 \| `mobile` \| `desktop`） | schema 默认值，改配置即可 |
+| 插件可配置项 | `path` / `authToken` / `cookieName` / `sessionTtlMs` / `rechargeUrl` / `maxConnections` / `pushUrls` / `pushCooldownMs` / `pushContent` / `rateLimit` / `trustedHosts` / `publicUrls` / `allowInsecurePublicHttp`（默认 false，放行明文公网入口）/ `doneGraceMs`（v2.8.0）/ `lanBridge`（v3.0.0：`{enabled, port, host}`，默认关）/ `approvalMode`（v3.1.3：`both` 默认 \| `mobile` \| `desktop`） | schema 默认值，改配置即可 |
 | 插件内置常量 | 通知上限 100、catalog 缓存 15s、SSE 心跳 25s、SSE 超时 15s、登录限流默认 10 次/60s（`rateLimit` 可配）、状态文件 `~/.dsh/mobile-remote/` | 合理默认，无需配置 |
 | App 内置常量 | HTTP 超时 15/20s（余额 25s）、连接/探测超时 8s、地址表上限 8、重试退避 1s→15s、看门狗 15s 检查 / 心跳 75s（3 周期）、日志保留 15 天/256KB、聊天初始窗口 50 条、历史分段 30 条、上下文圆环阈值 70%/90%、思维链折叠手动状态键 `dsh_mr_reasoning_overrides`（按会话持久化，每会话软上限 100 条） | 合理默认；修改点集中在各文件顶部常量 |
 | 已消除的写死 | 充值链接（原 App 硬编码 `platform.deepseek.com/top_up`） | v2.4.2 起走 `catalog.rechargeUrl`（插件配置为准） |
@@ -138,6 +138,6 @@ App 为 Flutter 原生 APK（`com.dsh.remote`），渲染后端为 **Impeller（
 ## 7. 发布签名
 
 - Release APK 需正式 keystore：`dsh-mobile-app/android/app/dsh-release.jks` + `android/key.properties`（**均已 gitignore，切勿提交**）。
-- 干净克隆无 key.properties 时自动回退 debug 签名（仅自用可安装；商店/公开分发必须自建 keystore）。
+- 没有 `key.properties` 时 release 构建失败，不再回退 debug 签名。debug 构建不需要它。仅测试分发可设 `ORG_GRADLE_PROJECT_allowDebugSignedRelease=true`（产物用 debug 密钥，无法覆盖正式包）。
 - 自建方法见 `dsh-mobile-app/README.md`「构建」一节。
 - ⚠ 更换签名 = 新应用：用户需卸载重装并重新扫码。

@@ -290,6 +290,12 @@ ThemeData _theme(bool dark) {
 }
 
 void main() {
+  // 与 ui_gallery_test.dart 相同：没有 Windows 等线就不比对 golden。
+  if (!File(r'C:\Windows\Fonts\Deng.ttf').existsSync()) {
+    test('页面 golden 走查需要 Windows 等线 Deng.ttf，当前环境跳过', () {}, skip: true);
+    return;
+  }
+
   setUpAll(() async {
     // 中文字体：官方回退栈里的族名 + 测试环境默认字体族名（'Ahem'/'FlutterTest'）。
     // 少数样式（如 appBarTheme.titleTextStyle）不带 fontFamilyFallback，会落到默认

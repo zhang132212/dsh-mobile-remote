@@ -69,7 +69,7 @@ approvalMode: both      # 默认。两端同卡、先答生效（需 DSH 0.1.2-r
 ## 设备/兼容类
 
 **Q：哪些手机能用？有苹果版吗？**
-Android 7.0+ 各品牌均可（Flutter 原生，渲染自动回退）；实测机型：小米 17 Pro Max。**苹果端尚未开发**——开发者没有苹果设备（Mac/iPhone），无法构建与真机调试；代码本身已平台无关，欢迎有 Mac 的开发者贡献 iOS 版本（见 docs/09-compatibility.md §4）。
+Android 7.0+ 各品牌均可（Flutter 原生，渲染自动回退）；实测机型：小米 17 Pro Max。**苹果端尚未正式发布**：移植在 `ios` 分支，没有正式安装包；未签名 IPA 需自行用 AltStore / Sideloadly 签名（见 docs/09-compatibility.md §4）。
 
 **Q：换手机 / 重装 App 后要重新连接吗？**
 要：连接信息只存手机本地。重新扫一次电脑端二维码即可（口令未变则电脑端不用动）。
@@ -89,7 +89,7 @@ Android 7.0+ 各品牌均可（Flutter 原生，渲染自动回退）；实测�
 - **手机 App 无需改动**：路径经二维码 / `bootstrap` 动态获取，自动适配新前缀。
 
 **Q：为什么我装的 App 升级时提示签名不一致？**
-构建者更换了签名 keystore（签名变更 = 新应用）。卸载旧版重装，然后重新扫码。开发/自用构建回退 debug 签名，公开分发必须用同一正式 keystore（见 dsh-mobile-app/README.md）。
+构建者更换了签名 keystore（签名变更 = 新应用）。卸载旧版重装，然后重新扫码。正式包必须用同一把 keystore；没有 `key.properties` 的 release 构建会失败，不再自动用 debug 签名（见 dsh-mobile-app/README.md）。
 
 ## 深色/显示类
 
