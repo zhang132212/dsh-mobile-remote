@@ -57,6 +57,8 @@
                 <data android:mimeType="application/json"/>
                 <data android:mimeType="text/html"/>
                 <data android:mimeType="image/svg+xml"/>
+                <!-- v3.2.16：PDF -->
+                <data android:mimeType="application/pdf"/>
             </intent-filter>
             <!-- 按扩展名的 VIEW：不少文件管理器不识别 MIME、只按后缀挑「打开方式」，
                  所以用 content + pathPattern 再兜一层（pathPattern 里的 \\. 是正则转义后的字面点号）。
@@ -95,6 +97,8 @@
                 <data android:pathPattern=".*\\.jsonc"/>
                 <data android:pathPattern=".*\\.geojson"/>
                 <data android:pathPattern=".*\\.webmanifest"/>
+                <!-- v3.2.16：PDF -->
+                <data android:pathPattern=".*\\.pdf"/>
             </intent-filter>
             <!-- 分享进来（ACTION_SEND）：微信/QQ 的「分享到」走这条，URI 在 EXTRA_STREAM 上（见 handleDocIntent）；
                  第三方聊天软件对文档类型普遍只报 octet-stream，必须显式列出否则分享列表里看不到本 App -->
@@ -111,6 +115,7 @@
                 <data android:mimeType="application/json"/>
                 <data android:mimeType="text/html"/>
                 <data android:mimeType="image/svg+xml"/>
+                <data android:mimeType="application/pdf"/>
             </intent-filter>
             <!-- 多选分享：本 App 只处理第一份（handleDocIntent 取 EXTRA_STREAM 单值），
                  但注册了才能在「分享多张/多份」时出现在列表里，不至于整个入口消失 -->

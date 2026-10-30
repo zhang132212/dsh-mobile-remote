@@ -18,9 +18,14 @@ final _quoteRe = RegExp(r'^\s*>\s?(.*)$');
 final _tableSepRe = RegExp(r'^\s*\|?[\s:|-]+\|?\s*$');
 
 /// 解析 Markdown → Document。
+///
+/// v3.2.16：入口先把行尾统一成 `\n`。Windows 上编辑的 md 是 CRLF，不归一化的话
+/// 行尾的 `\r` 会让标题 / 列表 / 分隔线等以 `$` 结尾的锚点全部失配，整篇退化成普通段落
+/// （项目里的文档大多来自 Windows，这个坑必须堵住）。
 Document parseMarkdown(String text, String title) {
+  final normalized = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
   final blocks = <DocBlock>[];
-  final lines = text.split('\n');
+  final lines = normalized.split('\n');
   var i = 0;
 
   List<DocInline> para = [];
@@ -210,7 +215,10 @@ Document parseMarkdown(String text, String title) {
 }
 
 /// 解析纯文本 → Document：保留原始换行，自动识别 URL，CSV 自动成表。
+///
+/// v3.2.16：与 Markdown 一样先归一化行尾，否则 CRLF 文件的行尾 \r 会漏进正文。
 Document parsePlainText(String text, String title) {
+  text = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
   // CSV 嗅探：连续多行且含逗号分隔、列数一致 → 当表格
   final csv = _tryParseCsv(text);
   if (csv != null) {

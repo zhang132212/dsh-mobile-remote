@@ -292,6 +292,8 @@ class _DocBrowserScreenState extends State<DocBrowserScreen> {
         DocFormat.json => Icons.data_object,
         DocFormat.html => Icons.language_outlined,
         DocFormat.svg => Icons.brush_outlined,
+        // v3.2.16：PDF（原生按页渲染）
+        DocFormat.pdf => Icons.picture_as_pdf_outlined,
         DocFormat.unknown => Icons.insert_drive_file_outlined,
       };
 
